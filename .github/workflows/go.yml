@@ -29,8 +29,151 @@ jobs:
       - name: Generate, build and test
         run: make all
 
-      - name: Smoke test
-        run: sudo timeout --preserve-status --signal=INT 10s ./bin/amd64/socket-connect-bpf -a
+      - name: Run integration smoke tests
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          HTTP_PORT=18080
+          TABLE_OUTPUT=/tmp/socket-connect-bpf-table.txt
+          TABLE_LOG=/tmp/socket-connect-bpf-table.log
+          NDJSON_OUTPUT=/tmp/socket-connect-bpf-events.ndjson
+          NDJSON_LOG=/tmp/socket-connect-bpf-ndjson.log
+
+          python3 -m http.server "${HTTP_PORT}" \
+            --bind 127.0.0.1 \
+            >/tmp/socket-connect-bpf-http.log 2>&1 &
+
+          server_pid=$!
+
+          cleanup() {
+            kill "${server_pid}" 2>/dev/null || true
+          }
+
+          trap cleanup EXIT
+
+          make_requests() {
+            for attempt in 1 2 3 4 5; do
+              curl \
+                --fail \
+                --silent \
+                --show-error \
+                "http://127.0.0.1:${HTTP_PORT}/" \
+                >/dev/null
+
+              sleep 0.2
+            done
+          }
+
+          sleep 1
+
+          sudo timeout \
+            --preserve-status \
+            --signal=INT \
+            6s \
+            ./bin/amd64/socket-connect-bpf \
+            >"${TABLE_OUTPUT}" \
+            2>"${TABLE_LOG}" &
+
+          table_tracer_pid=$!
+
+          sleep 2
+          make_requests
+          wait "${table_tracer_pid}"
+
+          if ! grep -q "${HTTP_PORT}" "${TABLE_OUTPUT}"; then
+            echo "Table output did not contain the test connection."
+            echo "--- table output ---"
+            cat "${TABLE_OUTPUT}"
+            echo "--- tracer log ---"
+            cat "${TABLE_LOG}"
+            exit 1
+          fi
+
+          sudo timeout \
+            --preserve-status \
+            --signal=INT \
+            6s \
+            ./bin/amd64/socket-connect-bpf \
+            --output ndjson \
+            >"${NDJSON_OUTPUT}" \
+            2>"${NDJSON_LOG}" &
+
+          ndjson_tracer_pid=$!
+
+          sleep 2
+          make_requests
+          wait "${ndjson_tracer_pid}"
+
+          python3 - "${NDJSON_OUTPUT}" "${HTTP_PORT}" <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          output_path = pathlib.Path(sys.argv[1])
+          expected_port = int(sys.argv[2])
+
+          if not output_path.exists():
+              raise SystemExit("NDJSON output file was not created")
+
+          lines = [
+              line
+              for line in output_path.read_text(encoding="utf-8").splitlines()
+              if line.strip()
+          ]
+
+          if not lines:
+              raise SystemExit("NDJSON output contained no events")
+
+          events = []
+
+          for line_number, line in enumerate(lines, start=1):
+              try:
+                  event = json.loads(line)
+              except json.JSONDecodeError as error:
+                  raise SystemExit(
+                      f"invalid JSON on line {line_number}: {error}"
+                  ) from error
+
+              if event.get("schema_version") != 1:
+                  raise SystemExit(
+                      f"unexpected schema version on line {line_number}"
+                  )
+
+              if event.get("event_type") != "connect_attempt":
+                  raise SystemExit(
+                      f"unexpected event type on line {line_number}"
+                  )
+
+              events.append(event)
+
+          matching_events = [
+              event
+              for event in events
+              if event.get("destination", {}).get("port") == expected_port
+          ]
+
+          if not matching_events:
+              raise SystemExit(
+                  f"no NDJSON event found for destination port {expected_port}"
+              )
+
+          if not any(
+              event.get("destination", {}).get("ip") == "127.0.0.1"
+              for event in matching_events
+          ):
+              raise SystemExit(
+                  "test connection did not contain destination IP 127.0.0.1"
+              )
+
+          if not any(
+              event.get("process", {}).get("comm") == "curl"
+              for event in matching_events
+          ):
+              raise SystemExit(
+                  "test connection was not attributed to curl"
+              )
+          PY
 
       - name: Create release artifacts
         run: |
