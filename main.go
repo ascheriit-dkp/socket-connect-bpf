@@ -52,15 +52,31 @@ func main() {
 }
 
 func setupOutput() {
-	printAll := flag.Bool("a", false, "print all (AS numbers and process arguments in output")
+	printAll := flag.Bool(
+		"a",
+		false,
+		"include process arguments and ASN information",
+	)
+
+	outputFormat := flag.String(
+		"output",
+		outputFormatTable,
+		"output format: table or ndjson",
+	)
+
 	flag.Parse()
+
+	selectedOutput, err := newOutputForFormat(*outputFormat, *printAll)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	if *printAll {
 		as.ParseASNumbersIPv4("./as/ip2asn-v4-u32.tsv")
 		as.ParseASNumbersIPv6("./as/ip2asn-v6.tsv")
 	}
 
-	out = newOutput(*printAll)
+	out = selectedOutput
 }
 
 func setupWorkers() {
@@ -100,7 +116,10 @@ func setupWorkers() {
 	}
 	defer rd6.Close()
 
-	rdOther, err := perf.NewReader(objs.OtherSocketEvents, os.Getpagesize())
+	rdOther, err := perf.NewReader(
+		objs.OtherSocketEvents,
+		os.Getpagesize(),
+	)
 	if err != nil {
 		log.Fatalf("creating other socket perf event reader: %s", err)
 	}
@@ -135,8 +154,8 @@ func setupWorkers() {
 	<-stopper
 	log.Println("Received signal, exiting program.")
 
-	// Closing the readers interrupts any blocked Read calls and allows all
-	// worker goroutines to terminate cleanly.
+	// Closing the readers interrupts blocked Read calls and allows all worker
+	// goroutines to terminate cleanly.
 	for _, reader := range []*perf.Reader{rd4, rd6, rdOther} {
 		if err := reader.Close(); err != nil {
 			log.Printf("closing perf event reader: %s", err)
@@ -245,7 +264,10 @@ func readOtherEvents(rd *perf.Reader) bool {
 			return false
 		}
 
-		log.Printf("reading from other socket perf event reader: %s", err)
+		log.Printf(
+			"reading from other socket perf event reader: %s",
+			err,
+		)
 		return true
 	}
 
@@ -277,15 +299,15 @@ func newGenericEventPayload(event *Event) eventPayload {
 
 	userInfo, err := user.LookupId(username)
 	if err != nil {
-		log.Printf("Could not lookup user with id: %d", event.UID)
+		log.Printf("could not look up user with ID %d", event.UID)
 	} else {
 		username = userInfo.Username
 	}
 
 	pid := int(event.Pid)
 
-	payload := eventPayload{
-		KernelTime:    strconv.Itoa(int(event.TsUs)),
+	return eventPayload{
+		KernelTime:    strconv.FormatUint(event.TsUs, 10),
 		GoTime:        time.Now(),
 		AddressFamily: conv.ToAddressFamily(int(event.Af)),
 		Pid:           event.Pid,
@@ -294,11 +316,9 @@ func newGenericEventPayload(event *Event) eventPayload {
 		User:          username,
 		Comm:          unix.ByteSliceToString(event.Task[:]),
 	}
-
-	return payload
 }
 
-// Event is a common event interface.
+// Event contains fields common to every emitted socket event.
 type Event struct {
 	TsUs uint64
 	Pid  uint32
@@ -307,14 +327,14 @@ type Event struct {
 	Task [16]byte
 }
 
-// IP4Event represents a socket connect event from AF_INET.
+// IP4Event represents a socket connect attempt using AF_INET.
 type IP4Event struct {
 	Event
 	Daddr uint32
 	Dport uint16
 }
 
-// IP6Event represents a socket connect event from AF_INET6.
+// IP6Event represents a socket connect attempt using AF_INET6.
 type IP6Event struct {
 	Event
 	Daddr1 uint64
@@ -322,8 +342,8 @@ type IP6Event struct {
 	Dport  uint16
 }
 
-// OtherSocketEvent represents socket connects that are not AF_INET,
-// AF_INET6 or AF_UNIX.
+// OtherSocketEvent represents socket connect attempts that do not use
+// AF_INET, AF_INET6 or AF_UNIX.
 type OtherSocketEvent struct {
 	Event
 }
