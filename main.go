@@ -34,12 +34,12 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ascheriit-dkp/socket-connect-bpf/as"
+	"github.com/ascheriit-dkp/socket-connect-bpf/conv"
+	"github.com/ascheriit-dkp/socket-connect-bpf/linux"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/perf"
 	"github.com/cilium/ebpf/rlimit"
-	"github.com/p-/socket-connect-bpf/as"
-	"github.com/p-/socket-connect-bpf/conv"
-	"github.com/p-/socket-connect-bpf/linux"
 	"golang.org/x/sys/unix"
 )
 

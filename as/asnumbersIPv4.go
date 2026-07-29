@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/p-/socket-connect-bpf/conv"
+	"github.com/ascheriit-dkp/socket-connect-bpf/conv"
 )
 
 var asMap = make(map[uint8][]ASInfo)
@@ -41,25 +41,30 @@ func ParseASNumbersIPv4(asTsvFile string) {
 	}
 
 	for _, each := range csvData {
-
-		startAddr, _ := strconv.ParseUint(each[0], 10, 32) // Could be cast to uint32
+		startAddr, _ := strconv.ParseUint(each[0], 10, 32)
 
 		bs := make([]byte, 4)
 		binary.BigEndian.PutUint32(bs, uint32(startAddr))
 
-		endAddr, _ := strconv.ParseUint(each[1], 10, 32) // Could be cast to uint32
+		endAddr, _ := strconv.ParseUint(each[1], 10, 32)
 		asNumber, _ := strconv.ParseUint(each[2], 10, 32)
 
 		if asNumber != 0 {
 			asName := getNameOnly(each[4])
 			bucket := bs[0]
-			entry := ASInfo{StartIP: uint32(startAddr), EndIP: uint32(endAddr), AsNumber: uint32(asNumber), Name: asName}
-			val, ok := asMap[bucket]
 
+			entry := ASInfo{
+				StartIP:  uint32(startAddr),
+				EndIP:    uint32(endAddr),
+				AsNumber: uint32(asNumber),
+				Name:     asName,
+			}
+
+			values, ok := asMap[bucket]
 			if !ok {
 				asMap[bucket] = []ASInfo{entry}
 			} else {
-				asMap[bucket] = append(val, entry)
+				asMap[bucket] = append(values, entry)
 			}
 		}
 	}
@@ -68,42 +73,47 @@ func ParseASNumbersIPv4(asTsvFile string) {
 func toBigIP4(addr uint32) net.IP {
 	ip := make(net.IP, 4)
 	binary.BigEndian.PutUint32(ip, addr)
+
 	return ip
 }
 
-func getNameOnly(desc string) string {
-	return strings.Fields(desc)[0]
+func getNameOnly(description string) string {
+	return strings.Fields(description)[0]
 }
 
-// GetASInfo returns information about an autonomous system (AS) of which the given IP is part of.
+// GetASInfoIPv4 returns information about the autonomous system containing
+// the supplied IPv4 address.
 func GetASInfoIPv4(ip net.IP) ASInfo {
 	ipAddr := conv.ToUint(ip)
+
 	bs := make([]byte, 4)
 	binary.BigEndian.PutUint32(bs, ipAddr)
+
 	bucket := bs[0]
 	values := asMap[bucket]
+
 	for _, asInfo := range values {
-		inRange := checkRange(&asInfo, ipAddr)
-		if inRange {
+		if checkRange(&asInfo, ipAddr) {
 			return asInfo
 		}
 	}
-	var empty ASInfo
-	return empty
+
+	return ASInfo{}
 }
 
-func checkRange(ips *ASInfo, ipAddr uint32) bool {
-	if ipAddr < ips.StartIP {
+func checkRange(asInfo *ASInfo, ipAddr uint32) bool {
+	if ipAddr < asInfo.StartIP {
 		return false
 	}
-	if ipAddr > ips.EndIP {
+
+	if ipAddr > asInfo.EndIP {
 		return false
 	}
+
 	return true
-
 }
 
-// ASInfo contains information about an autonomous system (AS)
+// ASInfo contains information about an autonomous system.
 type ASInfo struct {
 	StartIP  uint32
 	EndIP    uint32
