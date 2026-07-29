@@ -1,4 +1,4 @@
-module github.com/p-/socket-connect-bpf
+module github.com/ascheriit-dkp/socket-connect-bpf
 
 go 1.23
 
