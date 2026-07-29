@@ -1,44 +1,52 @@
 name: Go
-on: [push]
-jobs:
 
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
   build:
     name: Build
-    runs-on: "ubuntu-24.04"
+    runs-on: ubuntu-24.04
+
     steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
 
-    - name: Set up Go
-      uses: actions/setup-go@v5
-      with:
-        go-version: '1.23'
-      id: go
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
 
-    - name: Check out code into the Go module directory
-      uses: actions/checkout@v4
+      - name: Update AS data
+        run: ./updateASData.sh
 
-    - name: Update AS Data
-      run: ./updateASData.sh
+      - name: Generate, build and test
+        run: make all
 
-    - name: Make all (go generate, build + test)
-      run: make all
+      - name: Smoke test
+        run: sudo timeout --preserve-status --signal=INT 10s ./bin/amd64/socket-connect-bpf -a
 
-    - name: Smoke Test
-      run: sudo timeout --preserve-status --signal=INT 10s ./bin/amd64/socket-connect-bpf -a
+      - name: Create release artifacts
+        run: |
+          mkdir -p bin/amd64/as
+          mkdir -p bin/arm64/as
+          cp README.md bin/amd64/
+          cp README.md bin/arm64/
+          cp as/*.tsv bin/amd64/as/
+          cp as/*.tsv bin/arm64/as/
+          mkdir -p artifacts
+          tar czf artifacts/socket-connect-bpf-linux-amd64.tar.gz --directory=bin/amd64/ .
+          tar czf artifacts/socket-connect-bpf-linux-arm64.tar.gz --directory=bin/arm64/ .
 
-    - name: Create Build Artifact
-      run: |
-        mkdir -p bin/amd64/as
-        mkdir -p bin/arm64/as
-        cp ./README.md bin/amd64/
-        cp ./README.md bin/arm64/
-        cp as/*.tsv bin/amd64/as/
-        cp as/*.tsv bin/arm64/as/
-        mkdir artifacts
-        tar czf artifacts/socket-connect-bpf-linux-amd64.tar.gz --directory=bin/amd64/ .
-        tar czf artifacts/socket-connect-bpf-linux-arm64.tar.gz --directory=bin/arm64/ .
-
-    - name: Upload Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: socket-connect-bpf
-        path: artifacts
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: socket-connect-bpf
+          path: artifacts
+          if-no-files-found: error
