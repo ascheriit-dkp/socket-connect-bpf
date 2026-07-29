@@ -1,19 +1,25 @@
-BINARY_NAME=socket-connect-bpf
- 
+BINARY_NAME := socket-connect-bpf
+AMD64_DIR := bin/amd64
+ARM64_DIR := bin/arm64
+
+.PHONY: all generate build test clean
+
 all: build test
- 
-build:
+
+generate:
 	go generate
-	mkdir bin/amd64/
-	GOOS=linux GOARCH=amd64 go build -o bin/amd64/${BINARY_NAME}
-	mkdir bin/arm64/
-	GOOS=linux GOARCH=arm64 go build -o bin/arm64/${BINARY_NAME}
- 
+
+build: generate
+	mkdir -p $(AMD64_DIR) $(ARM64_DIR)
+	GOOS=linux GOARCH=amd64 go build -o $(AMD64_DIR)/$(BINARY_NAME)
+	GOOS=linux GOARCH=arm64 go build -o $(ARM64_DIR)/$(BINARY_NAME)
+
 test:
 	go test ./...
 
 clean:
 	go clean
-	rm -f bpf_bpfel_*.go
-	rm -f bin/amd64/${BINARY_NAME}
-	rm -f bin/arm64/${BINARY_NAME}
+	rm -f bpf_*_bpfel.go bpf_*_bpfeb.go
+	rm -f bpf_*_bpfel.o bpf_*_bpfeb.o
+	rm -f $(AMD64_DIR)/$(BINARY_NAME)
+	rm -f $(ARM64_DIR)/$(BINARY_NAME)
