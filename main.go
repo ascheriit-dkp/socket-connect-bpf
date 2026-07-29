@@ -30,6 +30,7 @@ import (
 	"os/user"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -45,6 +46,12 @@ import (
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go -cc clang-16 -cflags "-O2 -g -Wall -Werror" -target amd64,arm64 bpf securitySocketConnectSrc.c -- -Iheaders/
 
 var out output
+
+var eventLosses struct {
+	ipv4  atomic.Uint64
+	ipv6  atomic.Uint64
+	other atomic.Uint64
+}
 
 func main() {
 	setupOutput()
@@ -152,7 +159,7 @@ func setupWorkers() {
 	}()
 
 	<-stopper
-	log.Println("Received signal, exiting program.")
+	log.Println("received signal, exiting program")
 
 	// Closing the readers interrupts blocked Read calls and allows all worker
 	// goroutines to terminate cleanly.
@@ -163,6 +170,7 @@ func setupWorkers() {
 	}
 
 	workers.Wait()
+	reportEventLosses()
 }
 
 func readIP4Events(rd *perf.Reader) bool {
@@ -179,10 +187,13 @@ func readIP4Events(rd *perf.Reader) bool {
 	}
 
 	if record.LostSamples != 0 {
+		eventLosses.ipv4.Add(record.LostSamples)
+
 		log.Printf(
 			"IPv4 perf event ring buffer full, dropped %d samples",
 			record.LostSamples,
 		)
+
 		return true
 	}
 
@@ -224,10 +235,13 @@ func readIP6Events(rd *perf.Reader) bool {
 	}
 
 	if record.LostSamples != 0 {
+		eventLosses.ipv6.Add(record.LostSamples)
+
 		log.Printf(
 			"IPv6 perf event ring buffer full, dropped %d samples",
 			record.LostSamples,
 		)
+
 		return true
 	}
 
@@ -268,14 +282,18 @@ func readOtherEvents(rd *perf.Reader) bool {
 			"reading from other socket perf event reader: %s",
 			err,
 		)
+
 		return true
 	}
 
 	if record.LostSamples != 0 {
+		eventLosses.other.Add(record.LostSamples)
+
 		log.Printf(
 			"other socket perf event ring buffer full, dropped %d samples",
 			record.LostSamples,
 		)
+
 		return true
 	}
 
@@ -292,6 +310,21 @@ func readOtherEvents(rd *perf.Reader) bool {
 	out.PrintLine(eventPayload)
 
 	return true
+}
+
+func reportEventLosses() {
+	ipv4Lost := eventLosses.ipv4.Load()
+	ipv6Lost := eventLosses.ipv6.Load()
+	otherLost := eventLosses.other.Load()
+	totalLost := ipv4Lost + ipv6Lost + otherLost
+
+	log.Printf(
+		"perf event loss summary: total=%d ipv4=%d ipv6=%d other=%d",
+		totalLost,
+		ipv4Lost,
+		ipv6Lost,
+		otherLost,
+	)
 }
 
 func newGenericEventPayload(event *Event) eventPayload {
