@@ -1,9 +1,13 @@
+// Modified in 2026 by Ascheriit-Dkp.
+
 package as
 
 import (
 	"encoding/binary"
 	"encoding/csv"
+	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"strconv"
@@ -14,71 +18,153 @@ import (
 
 var asMap = make(map[uint8][]ASInfo)
 
-// ParseASNumbersIPv4 parses the autonomous system (AS) Numbers and IPv4 ranges from a .tsv file
-func ParseASNumbersIPv4(asTsvFile string) {
+// ParseASNumbersIPv4 loads IPv4 autonomous-system ranges from a TSV file.
+//
+// The existing lookup data is replaced only after the complete file has been
+// parsed successfully.
+func ParseASNumbersIPv4(asTsvFile string) error {
 	csvFile, err := os.Open(asTsvFile)
-
 	if err != nil {
-		fmt.Println("Could not read AS Number file")
-		fmt.Println(err)
-		return
+		return fmt.Errorf("open IPv4 ASN data %q: %w", asTsvFile, err)
 	}
-
 	defer csvFile.Close()
 
 	reader := csv.NewReader(csvFile)
-
 	reader.Comma = '\t'
 	reader.LazyQuotes = true
-
 	reader.FieldsPerRecord = -1
 
-	csvData, err := reader.ReadAll()
-	if err != nil {
-		fmt.Println("Could not read AS Number file")
-		fmt.Println(err)
-		return
-	}
+	parsedMap := make(map[uint8][]ASInfo)
 
-	for _, each := range csvData {
-		startAddr, _ := strconv.ParseUint(each[0], 10, 32)
+	for recordNumber := 1; ; recordNumber++ {
+		record, readErr := reader.Read()
 
-		bs := make([]byte, 4)
-		binary.BigEndian.PutUint32(bs, uint32(startAddr))
+		if errors.Is(readErr, io.EOF) {
+			break
+		}
 
-		endAddr, _ := strconv.ParseUint(each[1], 10, 32)
-		asNumber, _ := strconv.ParseUint(each[2], 10, 32)
+		if readErr != nil {
+			return fmt.Errorf(
+				"read IPv4 ASN data %q at record %d: %w",
+				asTsvFile,
+				recordNumber,
+				readErr,
+			)
+		}
 
-		if asNumber != 0 {
-			asName := getNameOnly(each[4])
-			bucket := bs[0]
+		if len(record) < 5 {
+			return fmt.Errorf(
+				"parse IPv4 ASN data %q at record %d: expected at least 5 fields, got %d",
+				asTsvFile,
+				recordNumber,
+				len(record),
+			)
+		}
 
-			entry := ASInfo{
-				StartIP:  uint32(startAddr),
-				EndIP:    uint32(endAddr),
-				AsNumber: uint32(asNumber),
-				Name:     asName,
-			}
+		startAddr, parseErr := parseIPv4UintField(
+			record[0],
+			"start address",
+			asTsvFile,
+			recordNumber,
+		)
+		if parseErr != nil {
+			return parseErr
+		}
 
-			values, ok := asMap[bucket]
-			if !ok {
-				asMap[bucket] = []ASInfo{entry}
-			} else {
-				asMap[bucket] = append(values, entry)
-			}
+		endAddr, parseErr := parseIPv4UintField(
+			record[1],
+			"end address",
+			asTsvFile,
+			recordNumber,
+		)
+		if parseErr != nil {
+			return parseErr
+		}
+
+		asNumber, parseErr := parseIPv4UintField(
+			record[2],
+			"AS number",
+			asTsvFile,
+			recordNumber,
+		)
+		if parseErr != nil {
+			return parseErr
+		}
+
+		if endAddr < startAddr {
+			return fmt.Errorf(
+				"parse IPv4 ASN data %q at record %d: end address %d is before start address %d",
+				asTsvFile,
+				recordNumber,
+				endAddr,
+				startAddr,
+			)
+		}
+
+		if asNumber == 0 {
+			continue
+		}
+
+		entry := ASInfo{
+			StartIP:  startAddr,
+			EndIP:    endAddr,
+			AsNumber: asNumber,
+			Name:     getNameOnly(record[4]),
+		}
+
+		startBucket := uint16(startAddr >> 24)
+		endBucket := uint16(endAddr >> 24)
+
+		for bucket := startBucket; bucket <= endBucket; bucket++ {
+			bucketID := uint8(bucket)
+			parsedMap[bucketID] = append(parsedMap[bucketID], entry)
 		}
 	}
+
+	asMap = parsedMap
+
+	return nil
+}
+
+func parseIPv4UintField(
+	value string,
+	fieldName string,
+	asTsvFile string,
+	recordNumber int,
+) (uint32, error) {
+	parsedValue, err := strconv.ParseUint(
+		strings.TrimSpace(value),
+		10,
+		32,
+	)
+	if err != nil {
+		return 0, fmt.Errorf(
+			"parse IPv4 ASN data %q at record %d: invalid %s %q: %w",
+			asTsvFile,
+			recordNumber,
+			fieldName,
+			value,
+			err,
+		)
+	}
+
+	return uint32(parsedValue), nil
 }
 
 func toBigIP4(addr uint32) net.IP {
-	ip := make(net.IP, 4)
+	ip := make(net.IP, net.IPv4len)
 	binary.BigEndian.PutUint32(ip, addr)
 
 	return ip
 }
 
 func getNameOnly(description string) string {
-	return strings.Fields(description)[0]
+	fields := strings.Fields(description)
+	if len(fields) == 0 {
+		return ""
+	}
+
+	return fields[0]
 }
 
 // GetASInfoIPv4 returns information about the autonomous system containing
@@ -86,7 +172,7 @@ func getNameOnly(description string) string {
 func GetASInfoIPv4(ip net.IP) ASInfo {
 	ipAddr := conv.ToUint(ip)
 
-	bs := make([]byte, 4)
+	bs := make([]byte, net.IPv4len)
 	binary.BigEndian.PutUint32(bs, ipAddr)
 
 	bucket := bs[0]
@@ -102,15 +188,7 @@ func GetASInfoIPv4(ip net.IP) ASInfo {
 }
 
 func checkRange(asInfo *ASInfo, ipAddr uint32) bool {
-	if ipAddr < asInfo.StartIP {
-		return false
-	}
-
-	if ipAddr > asInfo.EndIP {
-		return false
-	}
-
-	return true
+	return ipAddr >= asInfo.StartIP && ipAddr <= asInfo.EndIP
 }
 
 // ASInfo contains information about an autonomous system.

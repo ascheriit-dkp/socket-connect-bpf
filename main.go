@@ -23,11 +23,13 @@ import (
 	"encoding/binary"
 	"errors"
 	"flag"
+	"fmt"
 	"log"
 	"net"
 	"os"
 	"os/signal"
 	"os/user"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -71,6 +73,12 @@ func setupOutput() {
 		"output format: table or ndjson",
 	)
 
+	asnDirectory := flag.String(
+		"asn-dir",
+		"",
+		"directory containing ASN datasets (default: as beside executable)",
+	)
+
 	flag.Parse()
 
 	selectedOutput, err := newOutputForFormat(*outputFormat, *printAll)
@@ -79,11 +87,77 @@ func setupOutput() {
 	}
 
 	if *printAll {
-		as.ParseASNumbersIPv4("./as/ip2asn-v4-u32.tsv")
-		as.ParseASNumbersIPv6("./as/ip2asn-v6.tsv")
+		resolvedASNDirectory, resolveErr := resolveASNDirectory(*asnDirectory)
+		if resolveErr != nil {
+			log.Fatalf("resolving ASN data directory: %v", resolveErr)
+		}
+
+		if loadErr := loadASNData(resolvedASNDirectory); loadErr != nil {
+			log.Fatalf(
+				"loading ASN data from %q: %v",
+				resolvedASNDirectory,
+				loadErr,
+			)
+		}
 	}
 
 	out = selectedOutput
+}
+
+func resolveASNDirectory(configuredDirectory string) (string, error) {
+	if configuredDirectory != "" {
+		absoluteDirectory, err := filepath.Abs(configuredDirectory)
+		if err != nil {
+			return "", fmt.Errorf(
+				"resolve configured directory %q: %w",
+				configuredDirectory,
+				err,
+			)
+		}
+
+		return filepath.Clean(absoluteDirectory), nil
+	}
+
+	executablePath, err := os.Executable()
+	if err != nil {
+		return "", fmt.Errorf("determine executable path: %w", err)
+	}
+
+	resolvedExecutablePath, err := filepath.EvalSymlinks(executablePath)
+	if err != nil {
+		return "", fmt.Errorf(
+			"resolve executable path %q: %w",
+			executablePath,
+			err,
+		)
+	}
+
+	return filepath.Join(
+		filepath.Dir(resolvedExecutablePath),
+		"as",
+	), nil
+}
+
+func loadASNData(asnDirectory string) error {
+	ipv4Path := filepath.Join(
+		asnDirectory,
+		"ip2asn-v4-u32.tsv",
+	)
+
+	if err := as.ParseASNumbersIPv4(ipv4Path); err != nil {
+		return fmt.Errorf("load IPv4 ASN dataset: %w", err)
+	}
+
+	ipv6Path := filepath.Join(
+		asnDirectory,
+		"ip2asn-v6.tsv",
+	)
+
+	if err := as.ParseASNumbersIPv6(ipv6Path); err != nil {
+		return fmt.Errorf("load IPv6 ASN dataset: %w", err)
+	}
+
+	return nil
 }
 
 func setupWorkers() {
