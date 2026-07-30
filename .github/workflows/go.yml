@@ -50,20 +50,29 @@ jobs:
         run: |
           set -euo pipefail
 
-          HTTP_PORT=18080
+          IPV4_PORT=18080
+          IPV6_PORT=18082
+
           TABLE_OUTPUT=/tmp/socket-connect-bpf-table.txt
           TABLE_LOG=/tmp/socket-connect-bpf-table.log
           NDJSON_OUTPUT=/tmp/socket-connect-bpf-events.ndjson
           NDJSON_LOG=/tmp/socket-connect-bpf-ndjson.log
 
-          python3 -m http.server "${HTTP_PORT}" \
+          python3 -m http.server "${IPV4_PORT}" \
             --bind 127.0.0.1 \
-            >/tmp/socket-connect-bpf-http.log 2>&1 &
+            >/tmp/socket-connect-bpf-http-ipv4.log 2>&1 &
 
-          server_pid=$!
+          ipv4_server_pid=$!
+
+          python3 -m http.server "${IPV6_PORT}" \
+            --bind ::1 \
+            >/tmp/socket-connect-bpf-http-ipv6.log 2>&1 &
+
+          ipv6_server_pid=$!
 
           cleanup() {
-            kill "${server_pid}" 2>/dev/null || true
+            kill "${ipv4_server_pid}" 2>/dev/null || true
+            kill "${ipv6_server_pid}" 2>/dev/null || true
           }
 
           trap cleanup EXIT
@@ -71,14 +80,39 @@ jobs:
           make_requests() {
             for attempt in 1 2 3 4 5; do
               curl \
+                --ipv4 \
+                --noproxy '*' \
                 --fail \
                 --silent \
                 --show-error \
-                "http://127.0.0.1:${HTTP_PORT}/" \
+                "http://127.0.0.1:${IPV4_PORT}/" \
+                >/dev/null
+
+              curl \
+                --ipv6 \
+                --noproxy '*' \
+                --fail \
+                --silent \
+                --show-error \
+                "http://[::1]:${IPV6_PORT}/" \
                 >/dev/null
 
               sleep 0.2
             done
+          }
+
+          require_loss_summary() {
+            local log_path="$1"
+
+            if ! grep -Eq \
+              'ring-buffer event loss summary: total=[0-9]+' \
+              "${log_path}"
+            then
+              echo "Tracer log did not contain an event-loss summary."
+              echo "--- tracer log ---"
+              cat "${log_path}"
+              exit 1
+            fi
           }
 
           sleep 1
@@ -97,14 +131,19 @@ jobs:
           make_requests
           wait "${table_tracer_pid}"
 
-          if ! grep -q "${HTTP_PORT}" "${TABLE_OUTPUT}"; then
-            echo "Table output did not contain the test connection."
-            echo "--- table output ---"
-            cat "${TABLE_OUTPUT}"
-            echo "--- tracer log ---"
-            cat "${TABLE_LOG}"
-            exit 1
-          fi
+          for expected_port in "${IPV4_PORT}" "${IPV6_PORT}"; do
+            if ! grep -q "${expected_port}" "${TABLE_OUTPUT}"; then
+              echo \
+                "Table output did not contain destination port ${expected_port}."
+              echo "--- table output ---"
+              cat "${TABLE_OUTPUT}"
+              echo "--- tracer log ---"
+              cat "${TABLE_LOG}"
+              exit 1
+            fi
+          done
+
+          require_loss_summary "${TABLE_LOG}"
 
           sudo timeout \
             --preserve-status \
@@ -121,20 +160,28 @@ jobs:
           make_requests
           wait "${ndjson_tracer_pid}"
 
-          python3 - "${NDJSON_OUTPUT}" "${HTTP_PORT}" <<'PY'
+          require_loss_summary "${NDJSON_LOG}"
+
+          python3 - \
+            "${NDJSON_OUTPUT}" \
+            "${IPV4_PORT}" \
+            "${IPV6_PORT}" <<'PY'
           import json
           import pathlib
           import sys
 
           output_path = pathlib.Path(sys.argv[1])
-          expected_port = int(sys.argv[2])
+          ipv4_port = int(sys.argv[2])
+          ipv6_port = int(sys.argv[3])
 
           if not output_path.exists():
               raise SystemExit("NDJSON output file was not created")
 
           lines = [
               line
-              for line in output_path.read_text(encoding="utf-8").splitlines()
+              for line in output_path.read_text(
+                  encoding="utf-8",
+              ).splitlines()
               if line.strip()
           ]
 
@@ -163,32 +210,41 @@ jobs:
 
               events.append(event)
 
-          matching_events = [
-              event
-              for event in events
-              if event.get("destination", {}).get("port") == expected_port
+          expected_connections = [
+              {
+                  "port": ipv4_port,
+                  "ip": "127.0.0.1",
+                  "address_family": "AF_INET",
+              },
+              {
+                  "port": ipv6_port,
+                  "ip": "::1",
+                  "address_family": "AF_INET6",
+              },
           ]
 
-          if not matching_events:
-              raise SystemExit(
-                  f"no NDJSON event found for destination port {expected_port}"
-              )
+          for expected in expected_connections:
+              matching_events = [
+                  event
+                  for event in events
+                  if (
+                      event.get("destination", {}).get("port")
+                      == expected["port"]
+                      and event.get("destination", {}).get("ip")
+                      == expected["ip"]
+                      and event.get("address_family")
+                      == expected["address_family"]
+                      and event.get("process", {}).get("comm")
+                      == "curl"
+                  )
+              ]
 
-          if not any(
-              event.get("destination", {}).get("ip") == "127.0.0.1"
-              for event in matching_events
-          ):
-              raise SystemExit(
-                  "test connection did not contain destination IP 127.0.0.1"
-              )
-
-          if not any(
-              event.get("process", {}).get("comm") == "curl"
-              for event in matching_events
-          ):
-              raise SystemExit(
-                  "test connection was not attributed to curl"
-              )
+              if not matching_events:
+                  raise SystemExit(
+                      "no matching NDJSON event found for "
+                      f"{expected['address_family']} "
+                      f"{expected['ip']}:{expected['port']}"
+                  )
           PY
 
       - name: Create release artifacts

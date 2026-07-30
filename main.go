@@ -31,16 +31,15 @@ import (
 	"os/user"
 	"path/filepath"
 	"strconv"
-	"sync"
-	"sync/atomic"
 	"syscall"
 	"time"
 
 	"github.com/ascheriit-dkp/socket-connect-bpf/as"
 	"github.com/ascheriit-dkp/socket-connect-bpf/conv"
 	"github.com/ascheriit-dkp/socket-connect-bpf/linux"
+	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
-	"github.com/cilium/ebpf/perf"
+	"github.com/cilium/ebpf/ringbuf"
 	"github.com/cilium/ebpf/rlimit"
 	"golang.org/x/sys/unix"
 )
@@ -48,12 +47,6 @@ import (
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go -cc clang-16 -cflags "-O2 -g -Wall -Werror" -target amd64,arm64 bpf securitySocketConnectSrc.c -- -Iheaders/
 
 var out output
-
-var eventLosses struct {
-	ipv4  atomic.Uint64
-	ipv6  atomic.Uint64
-	other atomic.Uint64
-}
 
 func main() {
 	setupOutput()
@@ -183,225 +176,178 @@ func setupWorkers() {
 	if err != nil {
 		log.Fatalf("opening kprobe: %s", err)
 	}
-	defer kp.Close()
 
-	rd4, err := perf.NewReader(objs.Ipv4Events, os.Getpagesize())
+	reader, err := ringbuf.NewReader(objs.SocketEvents)
 	if err != nil {
-		log.Fatalf("creating IPv4 perf event reader: %s", err)
+		log.Fatalf("creating socket event ring-buffer reader: %s", err)
 	}
-	defer rd4.Close()
-
-	rd6, err := perf.NewReader(objs.Ipv6Events, os.Getpagesize())
-	if err != nil {
-		log.Fatalf("creating IPv6 perf event reader: %s", err)
-	}
-	defer rd6.Close()
-
-	rdOther, err := perf.NewReader(
-		objs.OtherSocketEvents,
-		os.Getpagesize(),
-	)
-	if err != nil {
-		log.Fatalf("creating other socket perf event reader: %s", err)
-	}
-	defer rdOther.Close()
 
 	out.PrintHeader()
 
-	var workers sync.WaitGroup
-	workers.Add(3)
-
 	go func() {
-		defer workers.Done()
+		<-stopper
 
-		for readIP4Events(rd4) {
-		}
+		log.Println("received signal, exiting program")
+
+		closeRingBufferReader(reader)
 	}()
 
-	go func() {
-		defer workers.Done()
+	readSocketEvents(reader)
 
-		for readIP6Events(rd6) {
-		}
-	}()
+	closeRingBufferReader(reader)
 
-	go func() {
-		defer workers.Done()
-
-		for readOtherEvents(rdOther) {
-		}
-	}()
-
-	<-stopper
-	log.Println("received signal, exiting program")
-
-	// Closing the readers interrupts blocked Read calls and allows all worker
-	// goroutines to terminate cleanly.
-	for _, reader := range []*perf.Reader{rd4, rd6, rdOther} {
-		if err := reader.Close(); err != nil {
-			log.Printf("closing perf event reader: %s", err)
-		}
+	// Stop producing events before reading the loss counter. Otherwise,
+	// connections observed after the reader closes could be counted as drops
+	// caused only by shutdown.
+	if err := kp.Close(); err != nil {
+		log.Printf("closing security_socket_connect kprobe: %s", err)
 	}
 
-	workers.Wait()
-	reportEventLosses()
+	reportDroppedEvents(objs.DroppedEvents)
 }
 
-func readIP4Events(rd *perf.Reader) bool {
-	var event IP4Event
+func closeRingBufferReader(reader *ringbuf.Reader) {
+	if err := reader.Close(); err != nil &&
+		!errors.Is(err, os.ErrClosed) {
+		log.Printf(
+			"closing socket event ring-buffer reader: %s",
+			err,
+		)
+	}
+}
 
-	record, err := rd.Read()
-	if err != nil {
-		if errors.Is(err, perf.ErrClosed) {
-			return false
+func readSocketEvents(reader *ringbuf.Reader) {
+	var record ringbuf.Record
+
+	for {
+		if err := reader.ReadInto(&record); err != nil {
+			if errors.Is(err, os.ErrClosed) {
+				return
+			}
+
+			log.Printf(
+				"reading from socket event ring buffer: %s",
+				err,
+			)
+
+			return
 		}
 
-		log.Printf("reading from IPv4 perf event reader: %s", err)
-		return true
+		if err := processSocketEventRecord(record.RawSample); err != nil {
+			log.Printf("processing socket event: %s", err)
+		}
 	}
+}
 
-	if record.LostSamples != 0 {
-		eventLosses.ipv4.Add(record.LostSamples)
-
-		log.Printf(
-			"IPv4 perf event ring buffer full, dropped %d samples",
-			record.LostSamples,
+func processSocketEventRecord(rawSample []byte) error {
+	if len(rawSample) != kernelSocketEventBinarySize {
+		return fmt.Errorf(
+			"unexpected record size %d; want %d",
+			len(rawSample),
+			kernelSocketEventBinarySize,
 		)
-
-		return true
 	}
+
+	var event kernelSocketEvent
 
 	if err := binary.Read(
-		bytes.NewBuffer(record.RawSample),
+		bytes.NewReader(rawSample),
 		binary.LittleEndian,
 		&event,
 	); err != nil {
-		log.Printf("parsing IPv4 perf event: %s", err)
-		return true
+		return fmt.Errorf("decode kernel event: %w", err)
 	}
 
-	eventPayload := newGenericEventPayload(&event.Event)
-	eventPayload.DestIP = conv.ToIP4(event.Daddr)
-	eventPayload.DestPort = event.Dport
-
-	asInfo := as.GetASInfoIPv4(eventPayload.DestIP)
-	eventPayload.ASNameInfo = ASNameInfo{
-		Name:     asInfo.Name,
-		AsNumber: asInfo.AsNumber,
+	if err := validateKernelSocketEvent(event); err != nil {
+		return err
 	}
 
-	out.PrintLine(eventPayload)
+	out.PrintLine(newKernelEventPayload(event))
 
-	return true
+	return nil
 }
 
-func readIP6Events(rd *perf.Reader) bool {
-	var event IP6Event
-
-	record, err := rd.Read()
-	if err != nil {
-		if errors.Is(err, perf.ErrClosed) {
-			return false
-		}
-
-		log.Printf("reading from IPv6 perf event reader: %s", err)
-		return true
-	}
-
-	if record.LostSamples != 0 {
-		eventLosses.ipv6.Add(record.LostSamples)
-
-		log.Printf(
-			"IPv6 perf event ring buffer full, dropped %d samples",
-			record.LostSamples,
+func validateKernelSocketEvent(event kernelSocketEvent) error {
+	if event.ABIVersion != kernelEventABIVersion {
+		return fmt.Errorf(
+			"unsupported kernel event ABI version %d",
+			event.ABIVersion,
 		)
-
-		return true
 	}
 
-	if err := binary.Read(
-		bytes.NewBuffer(record.RawSample),
-		binary.LittleEndian,
-		&event,
-	); err != nil {
-		log.Printf("parsing IPv6 perf event: %s", err)
-		return true
+	if event.EventType != kernelEventTypeConnectAttempt {
+		return fmt.Errorf(
+			"unsupported kernel event type %d",
+			event.EventType,
+		)
 	}
 
-	eventPayload := newGenericEventPayload(&event.Event)
-	eventPayload.DestIP = conv.ToIP6(event.Daddr1, event.Daddr2)
-	eventPayload.DestPort = event.Dport
-
-	asInfo := as.GetASInfoIPv6(eventPayload.DestIP)
-	eventPayload.ASNameInfo = ASNameInfo{
-		Name:     asInfo.Name,
-		AsNumber: asInfo.AsNumber,
-	}
-
-	out.PrintLine(eventPayload)
-
-	return true
-}
-
-func readOtherEvents(rd *perf.Reader) bool {
-	var event OtherSocketEvent
-
-	record, err := rd.Read()
-	if err != nil {
-		if errors.Is(err, perf.ErrClosed) {
-			return false
+	switch event.AddressLength {
+	case kernelAddressLengthNone:
+		if event.AddressFamily == unix.AF_INET ||
+			event.AddressFamily == unix.AF_INET6 {
+			return fmt.Errorf(
+				"address family %d has no destination address",
+				event.AddressFamily,
+			)
 		}
 
+	case kernelAddressLengthIPv4:
+		if event.AddressFamily != unix.AF_INET {
+			return fmt.Errorf(
+				"IPv4 address length used with address family %d",
+				event.AddressFamily,
+			)
+		}
+
+	case kernelAddressLengthIPv6:
+		if event.AddressFamily != unix.AF_INET6 {
+			return fmt.Errorf(
+				"IPv6 address length used with address family %d",
+				event.AddressFamily,
+			)
+		}
+
+	default:
+		return fmt.Errorf(
+			"unsupported destination address length %d",
+			event.AddressLength,
+		)
+	}
+
+	return nil
+}
+
+func reportDroppedEvents(droppedEvents *ebpf.Map) {
+	const counterKey uint32 = 0
+
+	var perCPUCounts []uint64
+
+	if err := droppedEvents.Lookup(
+		counterKey,
+		&perCPUCounts,
+	); err != nil {
 		log.Printf(
-			"reading from other socket perf event reader: %s",
+			"reading ring-buffer event loss counter: %s",
 			err,
 		)
 
-		return true
+		return
 	}
 
-	if record.LostSamples != 0 {
-		eventLosses.other.Add(record.LostSamples)
+	var total uint64
 
-		log.Printf(
-			"other socket perf event ring buffer full, dropped %d samples",
-			record.LostSamples,
-		)
-
-		return true
+	for _, count := range perCPUCounts {
+		total += count
 	}
-
-	if err := binary.Read(
-		bytes.NewBuffer(record.RawSample),
-		binary.LittleEndian,
-		&event,
-	); err != nil {
-		log.Printf("parsing other socket perf event: %s", err)
-		return true
-	}
-
-	eventPayload := newGenericEventPayload(&event.Event)
-	out.PrintLine(eventPayload)
-
-	return true
-}
-
-func reportEventLosses() {
-	ipv4Lost := eventLosses.ipv4.Load()
-	ipv6Lost := eventLosses.ipv6.Load()
-	otherLost := eventLosses.other.Load()
-	totalLost := ipv4Lost + ipv6Lost + otherLost
 
 	log.Printf(
-		"perf event loss summary: total=%d ipv4=%d ipv6=%d other=%d",
-		totalLost,
-		ipv4Lost,
-		ipv6Lost,
-		otherLost,
+		"ring-buffer event loss summary: total=%d",
+		total,
 	)
 }
 
-func newGenericEventPayload(event *Event) eventPayload {
+func newKernelEventPayload(event kernelSocketEvent) eventPayload {
 	username := strconv.Itoa(int(event.UID))
 
 	userInfo, err := user.LookupId(username)
@@ -411,48 +357,43 @@ func newGenericEventPayload(event *Event) eventPayload {
 		username = userInfo.Username
 	}
 
-	pid := int(event.Pid)
+	pid := int(event.PID)
 
-	return eventPayload{
-		KernelTime:    strconv.FormatUint(event.TsUs, 10),
+	payload := eventPayload{
+		KernelTime: strconv.FormatUint(
+			event.KernelTimestampNS,
+			10,
+		),
 		GoTime:        time.Now(),
-		AddressFamily: conv.ToAddressFamily(int(event.Af)),
-		Pid:           event.Pid,
+		AddressFamily: conv.ToAddressFamily(int(event.AddressFamily)),
+		Pid:           event.PID,
 		ProcessPath:   linux.ProcessPathForPid(pid),
 		ProcessArgs:   linux.ProcessArgsForPid(pid),
 		User:          username,
-		Comm:          unix.ByteSliceToString(event.Task[:]),
+		Comm:           unix.ByteSliceToString(event.Task[:]),
+		DestIP:         event.destinationIP(),
+		DestPort:       event.DestinationPort,
 	}
-}
 
-// Event contains fields common to every emitted socket event.
-type Event struct {
-	TsUs uint64
-	Pid  uint32
-	UID  uint32
-	Af   uint16
-	Task [16]byte
-}
+	switch event.AddressLength {
+	case kernelAddressLengthIPv4:
+		asInfo := as.GetASInfoIPv4(payload.DestIP)
 
-// IP4Event represents a socket connect attempt using AF_INET.
-type IP4Event struct {
-	Event
-	Daddr uint32
-	Dport uint16
-}
+		payload.ASNameInfo = ASNameInfo{
+			Name:     asInfo.Name,
+			AsNumber: asInfo.AsNumber,
+		}
 
-// IP6Event represents a socket connect attempt using AF_INET6.
-type IP6Event struct {
-	Event
-	Daddr1 uint64
-	Daddr2 uint64
-	Dport  uint16
-}
+	case kernelAddressLengthIPv6:
+		asInfo := as.GetASInfoIPv6(payload.DestIP)
 
-// OtherSocketEvent represents socket connect attempts that do not use
-// AF_INET, AF_INET6 or AF_UNIX.
-type OtherSocketEvent struct {
-	Event
+		payload.ASNameInfo = ASNameInfo{
+			Name:     asInfo.Name,
+			AsNumber: asInfo.AsNumber,
+		}
+	}
+
+	return payload
 }
 
 type eventPayload struct {
