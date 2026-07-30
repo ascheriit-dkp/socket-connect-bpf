@@ -29,6 +29,22 @@ jobs:
       - name: Generate, build and test
         run: make all
 
+      - name: Run output benchmarks
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          bash scripts/run-benchmarks.sh \
+            benchmark-results/benchmarks.txt
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v7
+        with:
+          name: socket-connect-bpf-benchmarks
+          path: benchmark-results/benchmarks.txt
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Run integration smoke tests
         shell: bash
         run: |
