@@ -229,6 +229,15 @@ jobs:
             done
           done
 
+      - name: Test packaged ASN loading
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          bash scripts/test-packaged-asn-loading.sh \
+            artifacts/socket-connect-bpf-linux-amd64.tar.gz \
+            18081
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
         with:
