@@ -29,6 +29,12 @@ repository_root="$(
 
 cd "${repository_root}"
 
+dirty_worktree="false"
+
+if [[ -n "$(git status --porcelain 2>/dev/null || true)" ]]; then
+	dirty_worktree="true"
+fi
+
 requested_output="${1:-benchmark-results/benchmarks.txt}"
 
 if [[ "${requested_output}" = /* ]]; then
@@ -47,12 +53,6 @@ commit_sha="$(
 	git rev-parse HEAD 2>/dev/null ||
 		printf '%s\n' "unknown"
 )"
-
-dirty_worktree="false"
-
-if [[ -n "$(git status --porcelain 2>/dev/null || true)" ]]; then
-	dirty_worktree="true"
-fi
 
 cpu_model="unknown"
 
