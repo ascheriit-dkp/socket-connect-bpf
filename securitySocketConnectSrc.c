@@ -110,64 +110,15 @@ struct
     __uint(max_entries, SOCKET_EVENT_RING_SIZE);
 } socket_events SEC(".maps");
 
-/*
- * The three perf-event maps remain temporarily active while userspace is
- * migrated to the unified ring-buffer stream.
- */
-
-struct ipv4_event_t {
-    u64 ts_us;
-    u32 pid;
-    u32 uid;
-    u16 af;
-    char task[TASK_COMM_LEN];
-    u32 daddr;
-    u16 dport;
-} __attribute__((packed));
-
-struct
-{
-    __uint(type, BPF_MAP_TYPE_PERF_EVENT_ARRAY);
-} ipv4_events SEC(".maps");
-
-struct ipv6_event_t {
-    u64 ts_us;
-    u32 pid;
-    u32 uid;
-    u16 af;
-    char task[TASK_COMM_LEN];
-    unsigned __int128 daddr;
-    u16 dport;
-} __attribute__((packed));
-
-struct
-{
-    __uint(type, BPF_MAP_TYPE_PERF_EVENT_ARRAY);
-} ipv6_events SEC(".maps");
-
-struct other_socket_event_t {
-    u64 ts_us;
-    u32 pid;
-    u32 uid;
-    u16 af;
-    char task[TASK_COMM_LEN];
-} __attribute__((packed));
-
-struct
-{
-    __uint(type, BPF_MAP_TYPE_PERF_EVENT_ARRAY);
-} other_socket_events SEC(".maps");
-
-static __always_inline void emit_unified_socket_event(
+static __always_inline void emit_socket_event(
     u32 pid,
     u32 uid,
     u16 address_family,
     u16 destination_port,
     u8 address_length,
-    const void *destination_address,
-    u64 kernel_timestamp_ns
+    const void *destination_address
 ) {
-    struct socket_event_t socket_event = {
+    struct socket_event_t event = {
         .abi_version = KERNEL_EVENT_ABI_VERSION,
         .event_type = KERNEL_EVENT_TYPE_CONNECT_ATTEMPT,
         .address_length = address_length,
@@ -175,191 +126,140 @@ static __always_inline void emit_unified_socket_event(
         .destination_port = destination_port,
         .pid = pid,
         .uid = uid,
-        .kernel_timestamp_ns = kernel_timestamp_ns
+        .kernel_timestamp_ns = bpf_ktime_get_ns()
     };
 
     if (address_length == KERNEL_ADDRESS_LENGTH_IPV4) {
-        bpf_probe_read(
-            &socket_event.destination_address,
+        if (bpf_probe_read(
+            event.destination_address,
             KERNEL_ADDRESS_LENGTH_IPV4,
             destination_address
-        );
+        ) < 0) {
+            return;
+        }
     } else if (address_length == KERNEL_ADDRESS_LENGTH_IPV6) {
-        bpf_probe_read(
-            &socket_event.destination_address,
+        if (bpf_probe_read(
+            event.destination_address,
             KERNEL_ADDRESS_LENGTH_IPV6,
             destination_address
-        );
+        ) < 0) {
+            return;
+        }
     }
 
-    bpf_get_current_comm(
-        &socket_event.task,
-        sizeof(socket_event.task)
-    );
+    if (bpf_get_current_comm(
+        event.task,
+        sizeof(event.task)
+    ) < 0) {
+        return;
+    }
 
     bpf_ringbuf_output(
         &socket_events,
-        &socket_event,
-        sizeof(socket_event),
+        &event,
+        sizeof(event),
         0
     );
 }
 
 SEC("kprobe/security_socket_connect")
 int kprobe_security_socket_connect(struct pt_regs *ctx) {
+    (void)ctx;
+
     u64 pid_tgid = bpf_get_current_pid_tgid();
     u32 pid = pid_tgid >> 32;
-
     u32 uid = bpf_get_current_uid_gid();
 
-    struct sockaddr *address = (struct sockaddr *)PT_REGS_PARM2(ctx);
+    struct sockaddr *address =
+        (struct sockaddr *)PT_REGS_PARM2(ctx);
 
     u16 address_family = 0;
 
-    bpf_probe_read(
+    if (bpf_probe_read(
         &address_family,
         sizeof(address_family),
         &address->sa_family
-    );
+    ) < 0) {
+        return 0;
+    }
 
     if (address_family == AF_INET) {
-        u64 kernel_timestamp_ns = bpf_ktime_get_ns();
+        struct sockaddr_in *destination =
+            (struct sockaddr_in *)address;
 
-        struct ipv4_event_t data4 = {
-            .ts_us = kernel_timestamp_ns / 1000,
-            .pid = pid,
-            .uid = uid,
-            .af = address_family
-        };
+        u16 destination_port_network = 0;
 
-        struct sockaddr_in *daddr = (struct sockaddr_in *)address;
-
-        bpf_probe_read(
-            &data4.daddr,
-            sizeof(data4.daddr),
-            &daddr->sin_addr.s_addr
-        );
-
-        u16 dport = 0;
-
-        bpf_probe_read(
-            &dport,
-            sizeof(dport),
-            &daddr->sin_port
-        );
-
-        data4.dport = bpf_ntohs(dport);
-
-        bpf_get_current_comm(
-            &data4.task,
-            sizeof(data4.task)
-        );
-
-        if (data4.dport != 0) {
-            emit_unified_socket_event(
-                pid,
-                uid,
-                address_family,
-                data4.dport,
-                KERNEL_ADDRESS_LENGTH_IPV4,
-                &daddr->sin_addr.s_addr,
-                kernel_timestamp_ns
-            );
-
-            bpf_perf_event_output(
-                ctx,
-                &ipv4_events,
-                BPF_F_CURRENT_CPU,
-                &data4,
-                sizeof(data4)
-            );
+        if (bpf_probe_read(
+            &destination_port_network,
+            sizeof(destination_port_network),
+            &destination->sin_port
+        ) < 0) {
+            return 0;
         }
-    } else if (address_family == AF_INET6) {
-        u64 kernel_timestamp_ns = bpf_ktime_get_ns();
 
-        struct ipv6_event_t data6 = {
-            .ts_us = kernel_timestamp_ns / 1000,
-            .pid = pid,
-            .uid = uid,
-            .af = address_family
-        };
+        u16 destination_port =
+            bpf_ntohs(destination_port_network);
 
-        struct sockaddr_in6 *daddr6 = (struct sockaddr_in6 *)address;
-
-        bpf_probe_read(
-            &data6.daddr,
-            sizeof(data6.daddr),
-            &daddr6->sin6_addr.in6_u.u6_addr32
-        );
-
-        u16 dport6 = 0;
-
-        bpf_probe_read(
-            &dport6,
-            sizeof(dport6),
-            &daddr6->sin6_port
-        );
-
-        data6.dport = bpf_ntohs(dport6);
-
-        bpf_get_current_comm(
-            &data6.task,
-            sizeof(data6.task)
-        );
-
-        if (data6.dport != 0) {
-            emit_unified_socket_event(
-                pid,
-                uid,
-                address_family,
-                data6.dport,
-                KERNEL_ADDRESS_LENGTH_IPV6,
-                &daddr6->sin6_addr.in6_u.u6_addr32,
-                kernel_timestamp_ns
-            );
-
-            bpf_perf_event_output(
-                ctx,
-                &ipv6_events,
-                BPF_F_CURRENT_CPU,
-                &data6,
-                sizeof(data6)
-            );
+        if (destination_port == 0) {
+            return 0;
         }
-    } else if (
+
+        emit_socket_event(
+            pid,
+            uid,
+            address_family,
+            destination_port,
+            KERNEL_ADDRESS_LENGTH_IPV4,
+            &destination->sin_addr.s_addr
+        );
+
+        return 0;
+    }
+
+    if (address_family == AF_INET6) {
+        struct sockaddr_in6 *destination =
+            (struct sockaddr_in6 *)address;
+
+        u16 destination_port_network = 0;
+
+        if (bpf_probe_read(
+            &destination_port_network,
+            sizeof(destination_port_network),
+            &destination->sin6_port
+        ) < 0) {
+            return 0;
+        }
+
+        u16 destination_port =
+            bpf_ntohs(destination_port_network);
+
+        if (destination_port == 0) {
+            return 0;
+        }
+
+        emit_socket_event(
+            pid,
+            uid,
+            address_family,
+            destination_port,
+            KERNEL_ADDRESS_LENGTH_IPV6,
+            destination->sin6_addr.in6_u.u6_addr8
+        );
+
+        return 0;
+    }
+
+    if (
         address_family != AF_UNIX &&
         address_family != AF_UNSPEC
     ) {
-        u64 kernel_timestamp_ns = bpf_ktime_get_ns();
-
-        struct other_socket_event_t socket_event = {
-            .ts_us = kernel_timestamp_ns / 1000,
-            .pid = pid,
-            .uid = uid,
-            .af = address_family
-        };
-
-        bpf_get_current_comm(
-            &socket_event.task,
-            sizeof(socket_event.task)
-        );
-
-        emit_unified_socket_event(
+        emit_socket_event(
             pid,
             uid,
             address_family,
             0,
             KERNEL_ADDRESS_LENGTH_NONE,
-            NULL,
-            kernel_timestamp_ns
-        );
-
-        bpf_perf_event_output(
-            ctx,
-            &other_socket_events,
-            BPF_F_CURRENT_CPU,
-            &socket_event,
-            sizeof(socket_event)
+            NULL
         );
     }
 
