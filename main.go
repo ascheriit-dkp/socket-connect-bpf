@@ -37,6 +37,7 @@ import (
 	"github.com/ascheriit-dkp/socket-connect-bpf/as"
 	"github.com/ascheriit-dkp/socket-connect-bpf/conv"
 	"github.com/ascheriit-dkp/socket-connect-bpf/linux"
+	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/cilium/ebpf/rlimit"
@@ -175,7 +176,6 @@ func setupWorkers() {
 	if err != nil {
 		log.Fatalf("opening kprobe: %s", err)
 	}
-	defer kp.Close()
 
 	reader, err := ringbuf.NewReader(objs.SocketEvents)
 	if err != nil {
@@ -189,16 +189,31 @@ func setupWorkers() {
 
 		log.Println("received signal, exiting program")
 
-		if closeErr := reader.Close(); closeErr != nil &&
-			!errors.Is(closeErr, os.ErrClosed) {
-			log.Printf(
-				"closing socket event ring-buffer reader: %s",
-				closeErr,
-			)
-		}
+		closeRingBufferReader(reader)
 	}()
 
 	readSocketEvents(reader)
+
+	closeRingBufferReader(reader)
+
+	// Stop producing events before reading the loss counter. Otherwise,
+	// connections observed after the reader closes could be counted as drops
+	// caused only by shutdown.
+	if err := kp.Close(); err != nil {
+		log.Printf("closing security_socket_connect kprobe: %s", err)
+	}
+
+	reportDroppedEvents(objs.DroppedEvents)
+}
+
+func closeRingBufferReader(reader *ringbuf.Reader) {
+	if err := reader.Close(); err != nil &&
+		!errors.Is(err, os.ErrClosed) {
+		log.Printf(
+			"closing socket event ring-buffer reader: %s",
+			err,
+		)
+	}
 }
 
 func readSocketEvents(reader *ringbuf.Reader) {
@@ -301,6 +316,35 @@ func validateKernelSocketEvent(event kernelSocketEvent) error {
 	}
 
 	return nil
+}
+
+func reportDroppedEvents(droppedEvents *ebpf.Map) {
+	const counterKey uint32 = 0
+
+	var perCPUCounts []uint64
+
+	if err := droppedEvents.Lookup(
+		counterKey,
+		&perCPUCounts,
+	); err != nil {
+		log.Printf(
+			"reading ring-buffer event loss counter: %s",
+			err,
+		)
+
+		return
+	}
+
+	var total uint64
+
+	for _, count := range perCPUCounts {
+		total += count
+	}
+
+	log.Printf(
+		"ring-buffer event loss summary: total=%d",
+		total,
+	)
 }
 
 func newKernelEventPayload(event kernelSocketEvent) eventPayload {
