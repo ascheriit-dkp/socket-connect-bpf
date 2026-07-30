@@ -35,6 +35,7 @@
 #define KERNEL_ADDRESS_LENGTH_IPV6 16
 
 #define SOCKET_EVENT_RING_SIZE (1 << 20)
+#define DROPPED_EVENT_COUNTER_KEY 0
 
 struct socket_event_t {
     u16 abi_version;
@@ -110,6 +111,27 @@ struct
     __uint(max_entries, SOCKET_EVENT_RING_SIZE);
 } socket_events SEC(".maps");
 
+struct
+{
+    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+    __uint(max_entries, 1);
+    __type(key, u32);
+    __type(value, u64);
+} dropped_events SEC(".maps");
+
+static __always_inline void record_dropped_event(void) {
+    u32 key = DROPPED_EVENT_COUNTER_KEY;
+
+    u64 *counter = bpf_map_lookup_elem(
+        &dropped_events,
+        &key
+    );
+
+    if (counter != NULL) {
+        *counter += 1;
+    }
+}
+
 static __always_inline void emit_socket_event(
     u32 pid,
     u32 uid,
@@ -154,18 +176,18 @@ static __always_inline void emit_socket_event(
         return;
     }
 
-    bpf_ringbuf_output(
+    if (bpf_ringbuf_output(
         &socket_events,
         &event,
         sizeof(event),
         0
-    );
+    ) < 0) {
+        record_dropped_event();
+    }
 }
 
 SEC("kprobe/security_socket_connect")
 int kprobe_security_socket_connect(struct pt_regs *ctx) {
-    (void)ctx;
-
     u64 pid_tgid = bpf_get_current_pid_tgid();
     u32 pid = pid_tgid >> 32;
     u32 uid = bpf_get_current_uid_gid();
