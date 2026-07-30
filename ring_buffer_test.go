@@ -9,7 +9,6 @@
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -21,6 +20,7 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -38,31 +38,24 @@ func TestProcessSocketEventRecordRejectsUnexpectedSize(t *testing.T) {
 	} {
 		size := size
 
-		t.Run(
-			strings.ReplaceAll(
-				"size "+string(rune(size)),
-				" ",
-				"_",
-			),
-			func(t *testing.T) {
-				t.Parallel()
+		t.Run("size_"+strconv.Itoa(size), func(t *testing.T) {
+			t.Parallel()
 
-				err := processSocketEventRecord(make([]byte, size))
-				if err == nil {
-					t.Fatal("processing an invalid record size returned nil")
-				}
+			err := processSocketEventRecord(make([]byte, size))
+			if err == nil {
+				t.Fatal("processing an invalid record size returned nil")
+			}
 
-				if !strings.Contains(
-					err.Error(),
-					"unexpected record size",
-				) {
-					t.Fatalf(
-						"error = %q; want unexpected record size",
-						err,
-					)
-				}
-			},
-		)
+			if !strings.Contains(
+				err.Error(),
+				"unexpected record size",
+			) {
+				t.Fatalf(
+					"error = %q; want unexpected record size",
+					err,
+				)
+			}
+		})
 	}
 }
 
