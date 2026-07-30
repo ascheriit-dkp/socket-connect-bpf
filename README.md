@@ -1,84 +1,90 @@
 # socket-connect-bpf
 
-socket-connect-bpf is a Linux command line utility that writes human-readable information about each application that makes new network connections to the standard output.
+socket-connect-bpf is a lightweight Linux command-line utility that records
+process-aware outbound socket connection attempts using eBPF.
+
+It can produce either a human-readable table or newline-delimited JSON
+(NDJSON).
 
 ![socket-connect-bpf while making a request with curl](samples/socket-connect-bpf.gif)
 
-More [sample output](samples/socket-connect-bpf-example.txt).
+See additional [sample output](samples/socket-connect-bpf-example.txt).
 
 ## Details
 
-socket-connect-bpf is a BPF/eBPF prototype with a kernel probe attached to [`security_socket_connect`](https://github.com/torvalds/linux/blob/master/include/linux/security.h). Connections to AF_UNSPEC and AF_UNIX are explicitly excluded.
+socket-connect-bpf attaches an eBPF kernel probe to
+[`security_socket_connect`](https://github.com/torvalds/linux/blob/master/include/linux/security.h).
 
-The following information about each request is displayed when available:
+Each emitted event represents a connection attempt observed at that hook. It
+does not prove that the connection later succeeded.
 
-| Name        | Description                                           | Sample             |
-|-------------|-------------------------------------------------------|--------------------|
-| Time        | Time at which the connection event was received.      | `17:15:58`         |
-| AF          | Address family.                                       | `AF_INET`          |
-| PID         | Process ID of the process making the request.         | `8549`             |
-| Process     | Process path or arguments of the process.             | `/usr/bin/curl`    |
-| User        | Username under which the process is executed.         | `root`             |
-| Destination | IP address and port of the destination.               | `127.0.0.1 53`     |
-| AS-Info     | Autonomous-system information for the IP address.     | `AS36459 (GITHUB)` |
+Connections using `AF_UNSPEC` and `AF_UNIX` are explicitly excluded.
+
+The following information is reported when available:
+
+| Name        | Description                                      | Sample             |
+|-------------|--------------------------------------------------|--------------------|
+| Time        | Time at which the event was received.            | `17:15:58`         |
+| AF          | Address family.                                  | `AF_INET`          |
+| PID         | Process ID that attempted the connection.        | `8549`             |
+| Process     | Process path or command-line arguments.          | `/usr/bin/curl`    |
+| User        | User running the process.                        | `root`             |
+| Destination | Destination IP address and port.                 | `127.0.0.1 53`     |
+| AS-Info     | Autonomous-system information for the address.   | `AS36459 (GITHUB)` |
 
 ## Use cases
 
-You might want to try `socket-connect-bpf` for the following use cases:
+socket-connect-bpf can help with tasks such as:
 
-- Check whether an application contains analytics.
-- Check whether trusted dependencies communicate with the outside world.
-- Use it as a less invasive alternative to kernel modules that provide similar functionality.
-
-## License
-
-This repository contains components under different licensing terms.
-
-- The inherited Go code and newly authored v2 Go/userspace code, tests,
-  workflows, and documentation are licensed under the Apache License,
-  Version 2.0 unless a file states otherwise.
-- The inherited BPF source retains its upstream provenance and its
-  kernel-facing `Dual MIT/GPL` declaration.
-- Vendored headers, Go dependencies, compact kernel headers, and ASN data
-  retain their own licensing terms.
-
-See the following files for complete details:
-
-- [`LICENSE`](LICENSE) — Apache License, Version 2.0.
-- [`LICENSING.md`](LICENSING.md) — component-level licensing policy.
-- [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) — provenance,
-  attribution, dependency, vendored-header, and external-data notices.
-
-A single licence must not be assumed to apply to every file in this repository.
+- Identifying unexpected outbound communication.
+- Checking whether an application contains analytics or telemetry.
+- Observing network activity from trusted dependencies.
+- Investigating which process attempted a particular connection.
+- Feeding process-aware connection events into scripts or log pipelines.
 
 ## System requirements
 
-- x64/amd64 or AArch64/arm64 CPU
-- Linux Kernel 4.18 or later
+- Linux
+- Linux kernel 4.18 or later
+- x86-64/amd64 or AArch64/arm64 CPU
+- Root privileges or equivalent permissions for loading and attaching eBPF
+  programs
 
 ## Installation
 
-### Install binaries
+### Release archive
 
-Tested on the following architectures:
+Download and extract the archive matching the target architecture:
 
-- amd64 (Intel x64 CPU)
-- arm64 (AWS Graviton2/Arm Neoverse-N1)
+- `socket-connect-bpf-linux-amd64.tar.gz`
+- `socket-connect-bpf-linux-arm64.tar.gz`
 
-Instructions were tested on Debian Bookworm with Linux Kernel 6.5.
+The extracted directory contains:
 
-Extract the corresponding `socket-connect-bpf-*.tar.gz` release archive.
+- `socket-connect-bpf`
+- `as/ip2asn-v4-u32.tsv`
+- `as/ip2asn-v6.tsv`
+- `README.md`
+- `LICENSE`
+- `LICENSING.md`
+- `THIRD_PARTY_NOTICES.md`
 
-### Verify binaries
+Keep the executable and its accompanying `as` directory together when using
+autonomous-system enrichment.
 
-Release verification information will be documented for v2 before stable
-release publication.
+### Release verification
+
+Release verification information will be documented before the stable v2
+release is published.
 
 ## Running
 
-Run the tracer with:
+Run the tracer with human-readable table output:
 
     sudo ./socket-connect-bpf
+
+The default output does not include process arguments or autonomous-system
+information.
 
 ### NDJSON output
 
@@ -89,36 +95,92 @@ Write one JSON object per event:
 The NDJSON schema currently uses schema version `1` and reports
 `connect_attempt` events.
 
-### Print all
+Diagnostics and errors are written to standard error rather than mixed into
+the NDJSON stream.
 
-The `-a` option also prints process arguments and autonomous-system
-information:
+### Extended information
 
-    sudo ./socket-connect-bpf -a
-
-### Autonomous System information
-
-Autonomous-system information is not displayed by default.
-
-Enable it with:
+Use `-a` to include process arguments and autonomous-system information:
 
     sudo ./socket-connect-bpf -a
 
-#### AS data
+The option can also be combined with NDJSON output:
 
-AS data from [IPtoASN](https://iptoasn.com/) is used.
+    sudo ./socket-connect-bpf -a --output ndjson
 
-The local autonomous-system lookup requires additional memory.
+## Autonomous-system data
 
-To update the AS data while developing, run:
+Autonomous-system enrichment uses datasets from
+[IPtoASN](https://iptoasn.com/).
+
+ASN datasets are loaded only when `-a` is enabled.
+
+### Default dataset location
+
+By default, socket-connect-bpf loads the following directory beside the real
+executable:
+
+    as/
+
+This means the tracer can be launched from any working directory as long as
+the release layout remains intact:
+
+    package/
+    ├── socket-connect-bpf
+    └── as/
+        ├── ip2asn-v4-u32.tsv
+        └── ip2asn-v6.tsv
+
+Symbolic links to the executable are resolved before locating the default
+dataset directory.
+
+### Custom dataset location
+
+Override the default directory with `--asn-dir`:
+
+    sudo ./socket-connect-bpf \
+      -a \
+      --asn-dir /var/lib/socket-connect-bpf/as
+
+Relative paths supplied through `--asn-dir` are resolved from the current
+working directory.
+
+The specified directory must contain:
+
+    ip2asn-v4-u32.tsv
+    ip2asn-v6.tsv
+
+When `-a` is enabled, missing or malformed ASN datasets cause startup to fail
+with a descriptive error. Running without `-a` does not require the datasets.
+
+### Updating datasets
+
+To download current datasets while developing from the repository:
 
     ./updateASData.sh
+
+Local ASN lookup requires additional memory, especially for the IPv6 dataset.
+
+## Command-line options
+
+    -a
+        Include process arguments and autonomous-system information.
+
+    --output table
+        Produce human-readable table output. This is the default.
+
+    --output ndjson
+        Produce one JSON object per event.
+
+    --asn-dir DIRECTORY
+        Load ASN datasets from DIRECTORY instead of the as directory beside
+        the executable. This option is used when -a is enabled.
 
 ## Development
 
 ### Build from the repository
 
-The following example uses Debian Bookworm with Linux Kernel 6.5:
+The following example uses Debian Bookworm with Linux kernel 6.5:
 
     # Install Go 1.23 or later.
     sudo snap install --classic go
@@ -126,7 +188,7 @@ The following example uses Debian Bookworm with Linux Kernel 6.5:
     # Install Clang 16.
     sudo apt install clang-16
 
-    # Clone the v2 fork.
+    # Clone the fork.
     git clone https://github.com/ascheriit-dkp/socket-connect-bpf.git
 
     cd socket-connect-bpf
@@ -134,9 +196,11 @@ The following example uses Debian Bookworm with Linux Kernel 6.5:
 
     make all
 
+The build produces binaries for amd64 and arm64 under `bin/`.
+
 ### Tests
 
-Run the complete generation, build, and test process:
+Run generation, builds, and all Go tests:
 
     make all
 
@@ -144,7 +208,30 @@ Run only the Go tests:
 
     go test ./...
 
-### IDE
+GitHub Actions additionally performs:
 
-[VS Code](https://code.visualstudio.com/) or another Go-compatible IDE can be
-used for development.
+- Real table-output tracing.
+- Real NDJSON tracing and schema validation.
+- Release archive content verification.
+- Packaged ASN loading from an unrelated working directory.
+
+## License
+
+This repository contains components under different licensing terms.
+
+- The inherited Go code and newly authored v2 Go/userspace code, tests,
+  workflows, scripts, and documentation are licensed under the Apache License,
+  Version 2.0 unless a file states otherwise.
+- The inherited BPF source retains its upstream provenance and its
+  kernel-facing `Dual MIT/GPL` declaration.
+- Vendored headers, Go dependencies, compact kernel headers, and ASN data
+  retain their own licensing terms.
+
+See:
+
+- [`LICENSE`](LICENSE) — Apache License, Version 2.0.
+- [`LICENSING.md`](LICENSING.md) — component-level licensing policy.
+- [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) — provenance,
+  attribution, dependency, vendored-header, and external-data notices.
+
+A single licence must not be assumed to apply to every file in this repository.
