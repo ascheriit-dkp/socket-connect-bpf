@@ -95,6 +95,9 @@ Write one JSON object per event:
 The NDJSON schema currently uses schema version `1` and reports
 `connect_attempt` events.
 
+The public compatibility contract is documented in
+[NDJSON Event Schema v1](docs/EVENT_SCHEMA_V1.md).
+
 Diagnostics and errors are written to standard error rather than mixed into
 the NDJSON stream.
 
@@ -212,6 +215,7 @@ GitHub Actions additionally performs:
 
 - Real table-output tracing.
 - Real NDJSON tracing and schema validation.
+- NDJSON schema v1 contract tests.
 - Release archive content verification.
 - Packaged ASN loading from an unrelated working directory.
 
