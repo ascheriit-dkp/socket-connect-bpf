@@ -20,6 +20,14 @@ does not prove that the connection later succeeded.
 
 Connections using `AF_UNSPEC` and `AF_UNIX` are explicitly excluded.
 
+Kernel events use a fixed internal ABI and are delivered to userspace through
+one shared BPF ring buffer. IPv4, IPv6, and supported non-IP address families
+therefore use the same event stream and decoder.
+
+Each internal event includes a monotonic kernel timestamp. The public NDJSON
+schema version 1 continues to expose `observed_at` as the userspace observation
+time for compatibility.
+
 The following information is reported when available:
 
 | Name        | Description                                      | Sample             |
@@ -45,7 +53,8 @@ socket-connect-bpf can help with tasks such as:
 ## System requirements
 
 - Linux
-- Linux kernel 4.18 or later
+- Linux kernel 5.8 or later, or a vendor kernel with equivalent BPF ring-buffer
+  support
 - x86-64/amd64 or AArch64/arm64 CPU
 - Root privileges or equivalent permissions for loading and attaching eBPF
   programs
@@ -110,6 +119,18 @@ Use `-a` to include process arguments and autonomous-system information:
 The option can also be combined with NDJSON output:
 
     sudo ./socket-connect-bpf -a --output ndjson
+
+### Event-loss reporting
+
+The BPF program counts events that cannot be submitted because the shared ring
+buffer has no available space.
+
+When the tracer shuts down, it writes a summary to standard error:
+
+    ring-buffer event loss summary: total=0
+
+A non-zero value means connection attempts were observed by the probe but
+could not be delivered to userspace.
 
 ## Autonomous-system data
 
