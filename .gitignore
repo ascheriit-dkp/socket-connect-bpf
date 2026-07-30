@@ -1,6 +1,7 @@
 socket-connect-bpf
 TODO.md
 bin/**/socket-connect-bpf
+benchmark-results/
 
 # generated files
 *.o
