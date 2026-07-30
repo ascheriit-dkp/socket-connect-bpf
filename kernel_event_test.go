@@ -17,6 +17,7 @@ package main
 import (
 	"encoding/binary"
 	"net"
+	"strconv"
 	"testing"
 	"unsafe"
 )
@@ -180,7 +181,7 @@ func TestKernelSocketEventDestinationIPRejectsUnsupportedLength(
 		addressLength := addressLength
 
 		t.Run(
-			string(rune(addressLength)),
+			"length_"+strconv.Itoa(int(addressLength)),
 			func(t *testing.T) {
 				t.Parallel()
 
