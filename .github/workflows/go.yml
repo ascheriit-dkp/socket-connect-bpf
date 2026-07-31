@@ -247,6 +247,14 @@ jobs:
                   )
           PY
 
+      - name: Run kernel filter integration tests
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          bash scripts/test-kernel-filters.sh \
+            ./bin/amd64/socket-connect-bpf
+
       - name: Create release artifacts
         shell: bash
         run: |
