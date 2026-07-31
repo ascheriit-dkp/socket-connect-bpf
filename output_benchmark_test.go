@@ -37,7 +37,7 @@ func BenchmarkSanitizeTerminalField(b *testing.B) {
 			value: "/usr/bin/curl --silent https://example.com/api",
 		},
 		{
-			name: "control_characters",
+			name:  "control_characters",
 			value: "curl\t--header\nAuthorization:\x1b[31msecret\r",
 		},
 		{
