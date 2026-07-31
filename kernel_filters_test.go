@@ -325,12 +325,12 @@ func TestConfigureKernelFiltersStopsBeforeConfigOnMembershipFailure(
 		filters       kernelFilterOptions
 		configureMaps func(
 			*[]kernelFilterMapWrite,
-		*recordingKernelFilterMap,
-		*recordingKernelFilterMap,
-		*recordingKernelFilterMap,
-		*recordingKernelFilterMap,
-	)
-		wantError     string
+			*recordingKernelFilterMap,
+			*recordingKernelFilterMap,
+			*recordingKernelFilterMap,
+			*recordingKernelFilterMap,
+		)
+		wantError      string
 		expectedWrites []kernelFilterMapWrite
 	}{
 		{
