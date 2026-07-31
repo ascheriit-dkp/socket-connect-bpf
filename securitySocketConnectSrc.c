@@ -37,6 +37,18 @@
 #define SOCKET_EVENT_RING_SIZE (1 << 20)
 #define DROPPED_EVENT_COUNTER_KEY 0
 
+#define FILTER_CONFIG_KEY 0
+#define MAX_FILTER_ENTRIES 1024
+
+#define FILTER_PID_ENABLED (1 << 0)
+#define FILTER_UID_ENABLED (1 << 1)
+#define FILTER_FAMILY_ENABLED (1 << 2)
+#define FILTER_PORT_ENABLED (1 << 3)
+
+#define FILTER_FAMILY_IPV4 (1 << 0)
+#define FILTER_FAMILY_IPV6 (1 << 1)
+#define FILTER_FAMILY_OTHER (1 << 2)
+
 struct socket_event_t {
     u16 abi_version;
     u8 event_type;
@@ -48,6 +60,11 @@ struct socket_event_t {
     u64 kernel_timestamp_ns;
     u8 destination_address[KERNEL_ADDRESS_LENGTH_IPV6];
     char task[TASK_COMM_LEN];
+};
+
+struct filter_config_t {
+    u32 enabled_filters;
+    u32 family_mask;
 };
 
 _Static_assert(
@@ -105,6 +122,21 @@ _Static_assert(
     "unexpected task offset"
 );
 
+_Static_assert(
+    sizeof(struct filter_config_t) == 8,
+    "filter_config_t must match the Go kernelFilterConfig size"
+);
+
+_Static_assert(
+    offsetof(struct filter_config_t, enabled_filters) == 0,
+    "unexpected enabled_filters offset"
+);
+
+_Static_assert(
+    offsetof(struct filter_config_t, family_mask) == 4,
+    "unexpected family_mask offset"
+);
+
 struct
 {
     __uint(type, BPF_MAP_TYPE_RINGBUF);
@@ -119,6 +151,38 @@ struct
     __type(value, u64);
 } dropped_events SEC(".maps");
 
+struct
+{
+    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __uint(max_entries, 1);
+    __type(key, u32);
+    __type(value, struct filter_config_t);
+} filter_config SEC(".maps");
+
+struct
+{
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, MAX_FILTER_ENTRIES);
+    __type(key, u32);
+    __type(value, u8);
+} pid_filters SEC(".maps");
+
+struct
+{
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, MAX_FILTER_ENTRIES);
+    __type(key, u32);
+    __type(value, u8);
+} uid_filters SEC(".maps");
+
+struct
+{
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, MAX_FILTER_ENTRIES);
+    __type(key, u16);
+    __type(value, u8);
+} port_filters SEC(".maps");
+
 static __always_inline void record_dropped_event(void) {
     u32 key = DROPPED_EVENT_COUNTER_KEY;
 
@@ -130,6 +194,100 @@ static __always_inline void record_dropped_event(void) {
     if (counter != NULL) {
         *counter += 1;
     }
+}
+
+static __always_inline const struct filter_config_t *
+get_filter_config(void) {
+    u32 key = FILTER_CONFIG_KEY;
+
+    return bpf_map_lookup_elem(
+        &filter_config,
+        &key
+    );
+}
+
+static __always_inline int matches_process_filters(
+    const struct filter_config_t *config,
+    u32 pid,
+    u32 uid
+) {
+    if (
+        config->enabled_filters & FILTER_PID_ENABLED
+    ) {
+        if (
+            bpf_map_lookup_elem(
+                &pid_filters,
+                &pid
+            ) == NULL
+        ) {
+            return 0;
+        }
+    }
+
+    if (
+        config->enabled_filters & FILTER_UID_ENABLED
+    ) {
+        if (
+            bpf_map_lookup_elem(
+                &uid_filters,
+                &uid
+            ) == NULL
+        ) {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
+static __always_inline u32 address_family_filter_mask(
+    u16 address_family
+) {
+    if (address_family == AF_INET) {
+        return FILTER_FAMILY_IPV4;
+    }
+
+    if (address_family == AF_INET6) {
+        return FILTER_FAMILY_IPV6;
+    }
+
+    if (
+        address_family == AF_UNIX ||
+        address_family == AF_UNSPEC
+    ) {
+        return 0;
+    }
+
+    return FILTER_FAMILY_OTHER;
+}
+
+static __always_inline int matches_family_filter(
+    const struct filter_config_t *config,
+    u32 family_mask
+) {
+    if (
+        !(config->enabled_filters & FILTER_FAMILY_ENABLED)
+    ) {
+        return 1;
+    }
+
+    return (config->family_mask & family_mask) != 0;
+}
+
+static __always_inline int matches_port_filter(
+    const struct filter_config_t *config,
+    u16 destination_port
+) {
+    if (
+        !(config->enabled_filters & FILTER_PORT_ENABLED)
+    ) {
+        return 1;
+    }
+
+    return bpf_map_lookup_elem(
+        &port_filters,
+        &destination_port
+    ) != NULL;
 }
 
 static __always_inline void emit_socket_event(
@@ -188,9 +346,24 @@ static __always_inline void emit_socket_event(
 
 SEC("kprobe/security_socket_connect")
 int kprobe_security_socket_connect(struct pt_regs *ctx) {
+    const struct filter_config_t *config =
+        get_filter_config();
+
+    if (config == NULL) {
+        return 0;
+    }
+
     u64 pid_tgid = bpf_get_current_pid_tgid();
     u32 pid = pid_tgid >> 32;
     u32 uid = bpf_get_current_uid_gid();
+
+    if (!matches_process_filters(
+        config,
+        pid,
+        uid
+    )) {
+        return 0;
+    }
 
     struct sockaddr *address =
         (struct sockaddr *)PT_REGS_PARM2(ctx);
@@ -202,6 +375,20 @@ int kprobe_security_socket_connect(struct pt_regs *ctx) {
         sizeof(address_family),
         &address->sa_family
     ) < 0) {
+        return 0;
+    }
+
+    u32 family_mask =
+        address_family_filter_mask(address_family);
+
+    if (family_mask == 0) {
+        return 0;
+    }
+
+    if (!matches_family_filter(
+        config,
+        family_mask
+    )) {
         return 0;
     }
 
@@ -223,6 +410,13 @@ int kprobe_security_socket_connect(struct pt_regs *ctx) {
             bpf_ntohs(destination_port_network);
 
         if (destination_port == 0) {
+            return 0;
+        }
+
+        if (!matches_port_filter(
+            config,
+            destination_port
+        )) {
             return 0;
         }
 
@@ -259,6 +453,13 @@ int kprobe_security_socket_connect(struct pt_regs *ctx) {
             return 0;
         }
 
+        if (!matches_port_filter(
+            config,
+            destination_port
+        )) {
+            return 0;
+        }
+
         emit_socket_event(
             pid,
             uid,
@@ -272,18 +473,19 @@ int kprobe_security_socket_connect(struct pt_regs *ctx) {
     }
 
     if (
-        address_family != AF_UNIX &&
-        address_family != AF_UNSPEC
+        config->enabled_filters & FILTER_PORT_ENABLED
     ) {
-        emit_socket_event(
-            pid,
-            uid,
-            address_family,
-            0,
-            KERNEL_ADDRESS_LENGTH_NONE,
-            NULL
-        );
+        return 0;
     }
+
+    emit_socket_event(
+        pid,
+        uid,
+        address_family,
+        0,
+        KERNEL_ADDRESS_LENGTH_NONE,
+        NULL
+    );
 
     return 0;
 }
