@@ -223,13 +223,13 @@ func TestKernelFilterOptionsDetectEachCategory(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name              string
-		filters           kernelFilterOptions
-		wantPIDFilter     bool
-		wantUIDFilter     bool
-		wantFamilyFilter  bool
-		wantPortFilter    bool
-		wantFamilyMask    uint32
+		name             string
+		filters          kernelFilterOptions
+		wantPIDFilter    bool
+		wantUIDFilter    bool
+		wantFamilyFilter bool
+		wantPortFilter   bool
+		wantFamilyMask   uint32
 	}{
 		{
 			name: "PID",
