@@ -49,11 +49,13 @@ import (
 var out output
 
 func main() {
-	setupOutput()
-	setupWorkers()
+	filters := setupOutput()
+	setupWorkers(filters)
 }
 
-func setupOutput() {
+func setupOutput() kernelFilterOptions {
+	var filters kernelFilterOptions
+
 	printAll := flag.Bool(
 		"a",
 		false,
@@ -71,6 +73,8 @@ func setupOutput() {
 		"",
 		"directory containing ASN datasets (default: as beside executable)",
 	)
+
+	filters.register(flag.CommandLine)
 
 	flag.Parse()
 
@@ -95,6 +99,8 @@ func setupOutput() {
 	}
 
 	out = selectedOutput
+
+	return filters
 }
 
 func resolveASNDirectory(configuredDirectory string) (string, error) {
@@ -153,7 +159,7 @@ func loadASNData(asnDirectory string) error {
 	return nil
 }
 
-func setupWorkers() {
+func setupWorkers(filters kernelFilterOptions) {
 	const fn = "security_socket_connect"
 
 	stopper := make(chan os.Signal, 1)
@@ -171,6 +177,21 @@ func setupWorkers() {
 		log.Fatalf("loading objects: %v", err)
 	}
 	defer objs.Close()
+
+	if err := configureKernelFilters(
+		filters,
+		kernelFilterMaps{
+			config: objs.FilterConfig,
+			pids:   objs.PidFilters,
+			uids:   objs.UidFilters,
+			ports:  objs.PortFilters,
+		},
+	); err != nil {
+		log.Fatalf(
+			"configuring kernel filters: %v",
+			err,
+		)
+	}
 
 	kp, err := link.Kprobe(fn, objs.KprobeSecuritySocketConnect, nil)
 	if err != nil {
@@ -370,9 +391,9 @@ func newKernelEventPayload(event kernelSocketEvent) eventPayload {
 		ProcessPath:   linux.ProcessPathForPid(pid),
 		ProcessArgs:   linux.ProcessArgsForPid(pid),
 		User:          username,
-		Comm:           unix.ByteSliceToString(event.Task[:]),
-		DestIP:         event.destinationIP(),
-		DestPort:       event.DestinationPort,
+		Comm:          unix.ByteSliceToString(event.Task[:]),
+		DestIP:        event.destinationIP(),
+		DestPort:      event.DestinationPort,
 	}
 
 	switch event.AddressLength {
@@ -404,11 +425,11 @@ type eventPayload struct {
 	ProcessPath   string
 	ProcessArgs   string
 	User          string
-	Comm           string
-	Host           string
-	DestIP         net.IP
-	DestPort       uint16
-	ASNameInfo     ASNameInfo
+	Comm          string
+	Host          string
+	DestIP        net.IP
+	DestPort      uint16
+	ASNameInfo    ASNameInfo
 }
 
 // ASNameInfo contains the name and number of an autonomous system.
