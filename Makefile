@@ -6,7 +6,7 @@ BENCHMARK_COUNT ?= 5
 BENCHMARK_TIME ?= 250ms
 BENCHMARK_CPU ?= 1,2,4
 
-.PHONY: all format-check generate build test benchmark clean
+.PHONY: all format-check generate build test benchmark release-artifacts verify-release-artifacts release clean
 
 all: format-check build test
 
@@ -44,9 +44,18 @@ benchmark:
 		-benchtime=$(BENCHMARK_TIME) \
 		-cpu=$(BENCHMARK_CPU)
 
+release-artifacts:
+	bash scripts/create-release-artifacts.sh
+
+verify-release-artifacts:
+	bash scripts/verify-release-artifacts.sh
+
+release: all release-artifacts verify-release-artifacts
+
 clean:
 	go clean
 	rm -f bpf_*_bpfel.go bpf_*_bpfeb.go
 	rm -f bpf_*_bpfel.o bpf_*_bpfeb.o
 	rm -f $(AMD64_DIR)/$(BINARY_NAME)
 	rm -f $(ARM64_DIR)/$(BINARY_NAME)
+	rm -rf artifacts
