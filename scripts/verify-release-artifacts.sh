@@ -69,7 +69,6 @@ done
 mapfile -t checksum_entries < <(
 	awk '
 		NF == 2 {
-			filename =	NF == 2 {
 			filename = $2
 			sub(/^\*/, "", filename)
 			print filename
