@@ -30,9 +30,7 @@ for command in git gzip install mktemp sha256sum tar; do
 	fi
 done
 
-source_date_epoch="${
-	SOURCE_DATE_EPOCH:-$(git log -1 --format=%ct)
-}"
+source_date_epoch="${SOURCE_DATE_EPOCH:-$(git log -1 --format=%ct)}"
 
 if [[ ! "${source_date_epoch}" =~ ^[0-9]+$ ]]; then
 	echo \
@@ -84,9 +82,7 @@ done
 for architecture in amd64 arm64; do
 	binary_path="bin/${architecture}/${binary_name}"
 	package_directory="${staging_root}/${architecture}"
-	archive_path="${
-		artifacts_directory
-	}/${binary_name}-linux-${architecture}.tar.gz"
+	archive_path="${artifacts_directory}/${binary_name}-linux-${architecture}.tar.gz"
 
 	if [[ ! -f "${binary_path}" ]]; then
 		echo "release binary not found: ${binary_path}" >&2
