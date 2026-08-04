@@ -280,8 +280,7 @@ func TestKernelFilterOptionsDetectEachCategory(t *testing.T) {
 				t.Fatal("configured filter reported empty")
 			}
 
-			if got := test.filters.hasPIDFilter();
-				got != test.wantPIDFilter {
+			if got := test.filters.hasPIDFilter(); got != test.wantPIDFilter {
 				t.Fatalf(
 					"PID filter enabled = %t; want %t",
 					got,
@@ -289,8 +288,7 @@ func TestKernelFilterOptionsDetectEachCategory(t *testing.T) {
 				)
 			}
 
-			if got := test.filters.hasUIDFilter();
-				got != test.wantUIDFilter {
+			if got := test.filters.hasUIDFilter(); got != test.wantUIDFilter {
 				t.Fatalf(
 					"UID filter enabled = %t; want %t",
 					got,
@@ -298,8 +296,7 @@ func TestKernelFilterOptionsDetectEachCategory(t *testing.T) {
 				)
 			}
 
-			if got := test.filters.hasFamilyFilter();
-				got != test.wantFamilyFilter {
+			if got := test.filters.hasFamilyFilter(); got != test.wantFamilyFilter {
 				t.Fatalf(
 					"family filter enabled = %t; want %t",
 					got,
@@ -307,8 +304,7 @@ func TestKernelFilterOptionsDetectEachCategory(t *testing.T) {
 				)
 			}
 
-			if got := test.filters.hasPortFilter();
-				got != test.wantPortFilter {
+			if got := test.filters.hasPortFilter(); got != test.wantPortFilter {
 				t.Fatalf(
 					"port filter enabled = %t; want %t",
 					got,
@@ -316,8 +312,7 @@ func TestKernelFilterOptionsDetectEachCategory(t *testing.T) {
 				)
 			}
 
-			if got := test.filters.familyMask();
-				got != test.wantFamilyMask {
+			if got := test.filters.familyMask(); got != test.wantFamilyMask {
 				t.Fatalf(
 					"family mask = %d; want %d",
 					got,
