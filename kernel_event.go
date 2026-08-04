@@ -34,14 +34,14 @@ const (
 // Field order and sizes are part of the internal kernel-to-userspace ABI.
 // Changes require a new kernelEventABIVersion and corresponding decoder.
 type kernelSocketEvent struct {
-	ABIVersion        uint16
-	EventType         uint8
-	AddressLength     uint8
-	AddressFamily     uint16
-	DestinationPort   uint16
-	PID               uint32
-	UID               uint32
-	KernelTimestampNS uint64
+	ABIVersion         uint16
+	EventType          uint8
+	AddressLength      uint8
+	AddressFamily      uint16
+	DestinationPort    uint16
+	PID                uint32
+	UID                uint32
+	KernelTimestampNS  uint64
 	DestinationAddress [net.IPv6len]byte
 	Task               [16]byte
 }

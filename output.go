@@ -173,9 +173,9 @@ type ndjsonEvent struct {
 	EventType     string            `json:"event_type"`
 	ObservedAt    string            `json:"observed_at"`
 	AddressFamily string            `json:"address_family"`
-	Process       ndjsonProcess      `json:"process"`
-	Destination   ndjsonDestination  `json:"destination"`
-	ASN           *ndjsonASN         `json:"asn,omitempty"`
+	Process       ndjsonProcess     `json:"process"`
+	Destination   ndjsonDestination `json:"destination"`
+	ASN           *ndjsonASN        `json:"asn,omitempty"`
 }
 
 type ndjsonProcess struct {

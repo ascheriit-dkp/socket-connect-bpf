@@ -6,9 +6,23 @@ BENCHMARK_COUNT ?= 5
 BENCHMARK_TIME ?= 250ms
 BENCHMARK_CPU ?= 1,2,4
 
-.PHONY: all generate build test benchmark clean
+.PHONY: all format-check generate build test benchmark clean
 
-all: build test
+all: format-check build test
+
+format-check:
+	@unformatted="$$(find . \
+		-type f \
+		-name '*.go' \
+		! -path './vendor/*' \
+		-exec gofmt -l {} +)"; \
+	if [ -n "$$unformatted" ]; then \
+		printf '%s\n' \
+			"The following Go files are not formatted:" \
+			"$$unformatted" \
+			"Run gofmt -w on these files before committing."; \
+		exit 1; \
+	fi
 
 generate:
 	go generate
