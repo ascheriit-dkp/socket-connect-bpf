@@ -51,119 +51,48 @@ func TestKernelTCPLifecycleEventLayout(t *testing.T) {
 		got  uintptr
 		want uintptr
 	}{
+		{"ABIVersion", unsafe.Offsetof(event.ABIVersion), 0},
+		{"EventType", unsafe.Offsetof(event.EventType), 2},
+		{"Protocol", unsafe.Offsetof(event.Protocol), 3},
+		{"AddressFamily", unsafe.Offsetof(event.AddressFamily), 4},
+		{"Flags", unsafe.Offsetof(event.Flags), 6},
+		{"PID", unsafe.Offsetof(event.PID), 8},
+		{"UID", unsafe.Offsetof(event.UID), 12},
+		{"ConnectionID", unsafe.Offsetof(event.ConnectionID), 16},
 		{
-			name: "
-	}{
-		{
-			name: "ABIVersion",
-			got:  unsafe.Offsetof(event.ABIVersion),
-			want: 0,
+			"KernelTimestampNS",
+			unsafe.Offsetof(event.KernelTimestampNS),
+			24,
 		},
 		{
-			name: "EventType",
-			got:  unsafe.Offsetof(event.EventType),
-			want: 2,
+			"AttemptTimestampNS",
+			unsafe.Offsetof(event.AttemptTimestampNS),
+			32,
 		},
 		{
-			name: "Protocol",
-			got:  unsafe.Offsetof(event.Protocol),
-			want: 3,
+			"EstablishedTimestampNS",
+			unsafe.Offsetof(event.EstablishedTimestampNS),
+			40,
+		},
+		{"ErrorCode", unsafe.Offsetof(event.ErrorCode), 48},
+		{"FailureSource", unsafe.Offsetof(event.FailureSource), 52},
+		{
+			"LocalAddressLength",
+			unsafe.Offsetof(event.LocalAddressLength),
+			53,
 		},
 		{
-			name: "AddressFamily",
-			got:  unsafe.Offsetof(event.AddressFamily),
-			want: 4,
+			"RemoteAddressLength",
+			unsafe.Offsetof(event.RemoteAddressLength),
+			54,
 		},
-		{
-			name: "Flags",
-			got:  unsafe.Offsetof(event.Flags),
-			want: 6,
-		},
-		{
-			name: "PID",
-			got:  unsafe.Offsetof(event.PID),
-			want: 8,
-		},
-		{
-			name: "UID",
-			got:  unsafe.Offsetof(event.UID),
-			want: 12,
-		},
-		{
-			name: "ConnectionID",
-			got:  unsafe.Offsetof(event.ConnectionID),
-			want: 16,
-		},
-		{
-			name: "KernelTimestampNS",
-			got:  unsafe.Offsetof(event.KernelTimestampNS),
-			want: 24,
-		},
-		{
-			name: "AttemptTimestampNS",
-			got:  unsafe.Offsetof(event.AttemptTimestampNS),
-			want: 32,
-		},
-		{
-			name: "EstablishedTimestampNS",
-			got:  unsafe.Offsetof(event.EstablishedTimestampNS),
-			want: 40,
-		},
-		{
-			name: "ErrorCode",
-			got:  unsafe.Offsetof(event.ErrorCode),
-			want: 48,
-		},
-		{
-			name: "FailureSource",
-			got:  unsafe.Offsetof(event.FailureSource),
-			want: 52,
-		},
-		{
-			name: "LocalAddressLength",
-			got:  unsafe.Offsetof(event.LocalAddressLength),
-			want: 53,
-		},
-		{
-			name: "RemoteAddressLength",
-			got:  unsafe.Offsetof(event.RemoteAddressLength),
-			want: 54,
-		},
-		{
-			name: "Reserved0",
-			got:  unsafe.Offsetof(event.Reserved0),
-			want: 55,
-		},
-		{
-			name: "LocalPort",
-			got:  unsafe.Offsetof(event.LocalPort),
-			want: 56,
-		},
-		{
-			name: "RemotePort",
-			got:  unsafe.Offsetof(event.RemotePort),
-			want: 58,
-		},
-		{
-			name: "LocalAddress",
-			got:  unsafe.Offsetof(event.LocalAddress),
-			want: 60,
-		},
-		{
-			name: "RemoteAddress",
-			got:  unsafe.Offsetof(event.RemoteAddress),
-			want: 76,
-		},
-		{
-			name: "Task",
-			got:  unsafe.Offsetof(event.Task),
-			want: 92,
-		},
-		{
-			name: "Reserved",
-			got:  unsafe.Offsetof(event.Reserved),
-			want: 108,
-		},
+		{"Reserved0", unsafe.Offsetof(event.Reserved0), 55},
+		{"LocalPort", unsafe.Offsetof(event.LocalPort), 56},
+		{"RemotePort", unsafe.Offsetof(event.RemotePort), 58},
+		{"LocalAddress", unsafe.Offsetof(event.LocalAddress), 60},
+		{"RemoteAddress", unsafe.Offsetof(event.RemoteAddress), 76},
+		{"Task", unsafe.Offsetof(event.Task), 92},
+		{"Reserved", unsafe.Offsetof(event.Reserved), 108},
 	}
 
 	for _, expectedOffset := range expectedOffsets {
@@ -186,144 +115,134 @@ func TestKernelTCPLifecycleEventLayout(t *testing.T) {
 func TestKernelTCPLifecycleEventEndpointIPs(t *testing.T) {
 	t.Parallel()
 
-	t.Run("IPv4", func(t *testing.T) {
-		t.Parallel()
+	tests := []struct {
+		name       string
+		event      kernelTCPLifecycleEvent
+		wantLocal  string
+		wantRemote string
+	}{
+		{
+			name:       "IPv4",
+			event:      validIPv4TCPLifecycleAttempt(),
+			wantLocal:  "192.0.2.10",
+			wantRemote: "198.51.100.20",
+		},
+		{
+			name:       "IPv6",
+			event:      validIPv6TCPLifecycleAttempt(),
+			wantLocal:  "2001:db8::10",
+			wantRemote: "2001:db8::20",
+		},
+	}
 
-		event := validIPv4TCPLifecycleAttempt()
+	for _, test := range tests {
+		test := test
 
-		localIP := event.localIP()
-		if !localIP.Equal(net.ParseIP("192.0.2.10")) {
-			t.Fatalf(
-				"local IP = %v; want 192.0.2.10",
-				localIP,
-			)
-		}
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
 
-		remoteIP := event.remoteIP()
-		if !remoteIP.Equal(net.ParseIP("198.51.100.20")) {
-			t.Fatalf(
-				"remote IP = %v; want 198.51.100.20",
-				remoteIP,
-			)
-		}
-	})
+			if got := test.event.localIP(); !got.Equal(
+				net.ParseIP(test.wantLocal),
+			) {
+				t.Fatalf(
+					"local IP = %v; want %s",
+					got,
+					test.wantLocal,
+				)
+			}
 
-	t.Run("IPv6", func(t *testing.T) {
-		t.Parallel()
+			if got := test.event.remoteIP(); !got.Equal(
+				net.ParseIP(test.wantRemote),
+			) {
+				t.Fatalf(
+					"remote IP = %v; want %s",
+					got,
+					test.wantRemote,
+				)
+			}
+		})
+	}
 
-		event := validIPv6TCPLifecycleAttempt()
+	event := validIPv4TCPLifecycleAttempt()
+	event.Flags &^= kernelTCPLifecycleFlagLocalAddress
+	event.LocalAddressLength = kernelAddressLengthNone
+	event.LocalAddress = [net.IPv6len]byte{}
 
-		localIP := event.localIP()
-		if !localIP.Equal(net.ParseIP("2001:db8::10")) {
-			t.Fatalf(
-				"local IP = %v; want 2001:db8::10",
-				localIP,
-			)
-		}
-
-		remoteIP := event.remoteIP()
-		if !remoteIP.Equal(net.ParseIP("2001:db8::20")) {
-			t.Fatalf(
-				"remote IP = %v; want 2001:db8::20",
-				remoteIP,
-			)
-		}
-	})
-
-	t.Run("absent local endpoint", func(t *testing.T) {
-		t.Parallel()
-
-		event := validIPv4TCPLifecycleAttempt()
-		event.Flags &^= kernelTCPLifecycleFlagLocalAddress
-		event.LocalAddressLength = kernelAddressLengthNone
-		event.LocalAddress = [net.IPv6len]byte{}
-
-		if got := event.localIP(); got != nil {
-			t.Fatalf("local IP = %v; want nil", got)
-		}
-	})
+	if got := event.localIP(); got != nil {
+		t.Fatalf("absent local IP = %v; want nil", got)
+	}
 }
 
-func TestKernelTCPLifecycleEventConnectLatency(t *testing.T) {
+func TestKernelTCPLifecycleEventTiming(t *testing.T) {
 	t.Parallel()
 
-	for _, eventType := range []uint8{
-		kernelTCPLifecycleEventTypeEstablished,
-		kernelTCPLifecycleEventTypeConnectFailed,
-	} {
-		eventType := eventType
+	t.Run("established connect latency", func(t *testing.T) {
+		t.Parallel()
 
-		t.Run(
-			lifecycleEventTypeTestName(eventType),
-			func(t *testing.T) {
-				t.Parallel()
+		event := validIPv4TCPLifecycleAttempt()
+		event.EventType = kernelTCPLifecycleEventTypeEstablished
+		event.KernelTimestampNS = 1_750
+		event.EstablishedTimestampNS = 1_750
 
-				event := validIPv4TCPLifecycleAttempt()
-				event.EventType = eventType
-				event.KernelTimestampNS = 1_750
+		got, ok := event.connectLatencyNS()
+		if !ok || got != 750 {
+			t.Fatalf(
+				"connect latency = %d, %t; want 750, true",
+				got,
+				ok,
+			)
+		}
+	})
 
-				if eventType ==
-					kernelTCPLifecycleEventTypeEstablished {
-					event.EstablishedTimestampNS = 1_750
-				} else {
-					event.FailureSource =
-						kernelTCPLifecycleFailureSourceTCPState
-				}
+	t.Run("failed connect latency", func(t *testing.T) {
+		t.Parallel()
 
-				got, ok := event.connectLatencyNS()
-				if !ok {
-					t.Fatal("connect latency was unavailable")
-				}
+		event := validIPv4TCPLifecycleAttempt()
+		event.EventType = kernelTCPLifecycleEventTypeConnectFailed
+		event.KernelTimestampNS = 1_750
+		event.FailureSource =
+			kernelTCPLifecycleFailureSourceTCPState
 
-				const want uint64 = 750
-				if got != want {
-					t.Fatalf(
-						"connect latency = %d; want %d",
-						got,
-						want,
-					)
-				}
-			},
-		)
-	}
+		got, ok := event.connectLatencyNS()
+		if !ok || got != 750 {
+			t.Fatalf(
+				"connect latency = %d, %t; want 750, true",
+				got,
+				ok,
+			)
+		}
+	})
+
+	t.Run("closed duration", func(t *testing.T) {
+		t.Parallel()
+
+		event := validIPv4TCPLifecycleAttempt()
+		event.EventType = kernelTCPLifecycleEventTypeClosed
+		event.KernelTimestampNS = 5_000
+		event.EstablishedTimestampNS = 2_000
+
+		got, ok := event.connectionDurationNS()
+		if !ok || got != 3_000 {
+			t.Fatalf(
+				"connection duration = %d, %t; want 3000, true",
+				got,
+				ok,
+			)
+		}
+	})
 
 	event := validIPv4TCPLifecycleAttempt()
 
 	if got, ok := event.connectLatencyNS(); ok {
 		t.Fatalf(
-			"attempt latency = %d, true; want unavailable",
+			"attempt connect latency = %d, true; want unavailable",
 			got,
 		)
 	}
-}
-
-func TestKernelTCPLifecycleEventConnectionDuration(t *testing.T) {
-	t.Parallel()
-
-	event := validIPv4TCPLifecycleAttempt()
-	event.EventType = kernelTCPLifecycleEventTypeClosed
-	event.KernelTimestampNS = 5_000
-	event.EstablishedTimestampNS = 2_000
-
-	got, ok := event.connectionDurationNS()
-	if !ok {
-		t.Fatal("connection duration was unavailable")
-	}
-
-	const want uint64 = 3_000
-	if got != want {
-		t.Fatalf(
-			"connection duration = %d; want %d",
-			got,
-			want,
-		)
-	}
-
-	event.EventType = kernelTCPLifecycleEventTypeEstablished
 
 	if got, ok := event.connectionDurationNS(); ok {
 		t.Fatalf(
-			"established duration = %d, true; want unavailable",
+			"attempt duration = %d, true; want unavailable",
 			got,
 		)
 	}
@@ -367,7 +286,8 @@ func TestValidateKernelTCPLifecycleEventAcceptsValidEvents(
 				event.KernelTimestampNS = 1_250
 				event.Flags |=
 					kernelTCPLifecycleFlagErrorCode
-				event.ErrorCode = unix.ECONNREFUSED
+				event.ErrorCode =
+					int32(unix.ECONNREFUSED)
 				event.FailureSource =
 					kernelTCPLifecycleFailureSourceSocketError
 
@@ -437,9 +357,9 @@ func TestValidateKernelTCPLifecycleEventRejectsInvalidEvents(
 	t.Parallel()
 
 	tests := []struct {
-		name        string
-		mutate      func(*kernelTCPLifecycleEvent)
-		errorText   string
+		name      string
+		mutate    func(*kernelTCPLifecycleEvent)
+		errorText string
 	}{
 		{
 			name: "ABI version",
@@ -533,7 +453,8 @@ func TestValidateKernelTCPLifecycleEventRejectsInvalidEvents(
 					kernelTCPLifecycleFlagRemoteAddress
 				event.RemoteAddressLength =
 					kernelAddressLengthNone
-				event.RemoteAddress = [net.IPv6len]byte{}
+				event.RemoteAddress =
+					[net.IPv6len]byte{}
 			},
 			errorText: "has no remote address",
 		},
@@ -619,7 +540,8 @@ func TestValidateKernelTCPLifecycleEventRejectsInvalidEvents(
 					kernelTCPLifecycleFailureSourceConnectReturn
 				event.Flags |=
 					kernelTCPLifecycleFlagErrorCode
-				event.ErrorCode = -unix.ECONNREFUSED
+				event.ErrorCode =
+					-int32(unix.ECONNREFUSED)
 			},
 			errorText: "invalid error code",
 		},
@@ -731,19 +653,4 @@ func validIPv6TCPLifecycleAttempt() kernelTCPLifecycleEvent {
 	copy(event.Task[:], []byte("curl"))
 
 	return event
-}
-
-func lifecycleEventTypeTestName(eventType uint8) string {
-	switch eventType {
-	case kernelTCPLifecycleEventTypeConnectAttempt:
-		return "connect_attempt"
-	case kernelTCPLifecycleEventTypeEstablished:
-		return "established"
-	case kernelTCPLifecycleEventTypeConnectFailed:
-		return "connect_failed"
-	case kernelTCPLifecycleEventTypeClosed:
-		return "closed"
-	default:
-		return "unknown"
-	}
 }
