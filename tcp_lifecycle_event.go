@@ -37,12 +37,11 @@ const (
 	kernelTCPLifecycleFlagRemotePort    uint16 = 1 << 3
 	kernelTCPLifecycleFlagErrorCode     uint16 = 1 << 4
 
-	kernelTCPLifecycleKnownFlags uint16 =
-		kernelTCPLifecycleFlagLocalAddress |
-			kernelTCPLifecycleFlagLocalPort |
-			kernelTCPLifecycleFlagRemoteAddress |
-			kernelTCPLifecycleFlagRemotePort |
-			kernelTCPLifecycleFlagErrorCode
+	kernelTCPLifecycleKnownFlags uint16 = kernelTCPLifecycleFlagLocalAddress |
+		kernelTCPLifecycleFlagLocalPort |
+		kernelTCPLifecycleFlagRemoteAddress |
+		kernelTCPLifecycleFlagRemotePort |
+		kernelTCPLifecycleFlagErrorCode
 
 	kernelTCPLifecycleFailureSourceNone          uint8 = 0
 	kernelTCPLifecycleFailureSourceConnectReturn uint8 = 1
