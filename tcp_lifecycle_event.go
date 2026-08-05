@@ -71,12 +71,12 @@ type kernelTCPLifecycleEvent struct {
 	PID uint32
 	UID uint32
 
-	ConnectionID          uint64
-	KernelTimestampNS     uint64
-	AttemptTimestampNS    uint64
+	ConnectionID           uint64
+	KernelTimestampNS      uint64
+	AttemptTimestampNS     uint64
 	EstablishedTimestampNS uint64
 
-	ErrorCode    int32
+	ErrorCode     int32
 	FailureSource uint8
 
 	LocalAddressLength  uint8
