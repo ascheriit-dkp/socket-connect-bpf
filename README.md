@@ -84,14 +84,55 @@ The extracted directory contains:
 - `LICENSE`
 - `LICENSING.md`
 - `THIRD_PARTY_NOTICES.md`
+- `SECURITY.md`
 
 Keep the executable and its accompanying `as` directory together when using
 autonomous-system enrichment.
 
 ### Release verification
 
-Release verification information will be documented before the stable v2
-release is published.
+Each release includes a `SHA256SUMS` manifest containing the SHA-256 digest of
+both Linux archives.
+
+Download `SHA256SUMS` and both archives into the same directory, then run:
+
+    sha256sum --check SHA256SUMS
+
+A successful verification reports:
+
+    socket-connect-bpf-linux-amd64.tar.gz: OK
+    socket-connect-bpf-linux-arm64.tar.gz: OK
+
+To verify only the amd64 archive:
+
+    grep ' socket-connect-bpf-linux-amd64.tar.gz$' SHA256SUMS |
+      sha256sum --check -
+
+To verify only the arm64 archive:
+
+    grep ' socket-connect-bpf-linux-arm64.tar.gz$' SHA256SUMS |
+      sha256sum --check -
+
+Do not run an archive whose checksum does not match the published manifest.
+
+The SHA-256 manifest verifies that downloaded bytes match the bytes published
+with the release. It is not currently a cryptographic signature and does not
+independently authenticate the repository owner.
+
+Release archives are created deterministically. For the same source commit,
+toolchain, dependencies, generated sources, and ASN datasets, repeated
+packaging should produce identical archive checksums.
+
+The release verifier also checks:
+
+- The exact set of archive members.
+- File and directory types.
+- Executable and documentation permissions.
+- Normalized user and group ownership.
+- Normalized archive timestamps.
+- Absence of absolute paths and parent-directory traversal.
+- Absence of optional filename and timestamp metadata in the gzip header.
+- The integrity of the complete compressed stream.
 
 ## Running
 
@@ -157,11 +198,11 @@ matches only events whose UID is `1000` and whose destination port is `443`.
 
 The supported address-family values are:
 
-| Value   | Matching events                                      |
-|---------|------------------------------------------------------|
-| `ipv4`  | `AF_INET` events                                     |
-| `ipv6`  | `AF_INET6` events                                    |
-| `other` | Supported non-IP families other than UNIX/UNSPEC     |
+| Value   | Matching events                                  |
+|---------|--------------------------------------------------|
+| `ipv4`  | `AF_INET` events                                 |
+| `ipv6`  | `AF_INET6` events                                |
+| `other` | Supported non-IP families other than UNIX/UNSPEC |
 
 Address-family values are case-sensitive.
 
@@ -353,8 +394,35 @@ Run the live kernel-filter integration suite after building:
 The live integration suite requires Linux, root privileges through `sudo`, and
 the ability to attach the eBPF probe.
 
+### Local release artifacts
+
+Build binaries, run the Go tests, create the release archives, generate
+`SHA256SUMS`, and verify the resulting artifacts:
+
+    make release
+
+Create the archives from existing binaries without rebuilding:
+
+    make release-artifacts
+
+Verify existing files under `artifacts/`:
+
+    make verify-release-artifacts
+
+The release scripts use the latest Git commit timestamp by default. A specific
+timestamp can be supplied for reproducible packaging:
+
+    SOURCE_DATE_EPOCH=1700000000 make release-artifacts
+
+The generated files are:
+
+    artifacts/socket-connect-bpf-linux-amd64.tar.gz
+    artifacts/socket-connect-bpf-linux-arm64.tar.gz
+    artifacts/SHA256SUMS
+
 GitHub Actions additionally performs:
 
+- Shell-script syntax validation.
 - Real unfiltered table-output tracing.
 - Real unfiltered NDJSON tracing and schema validation.
 - Live PID, UID, address-family, and destination-port filtering tests.
@@ -362,7 +430,11 @@ GitHub Actions additionally performs:
 - Filtered table and NDJSON exclusion checks.
 - NDJSON schema v1 contract tests.
 - Event-loss summary validation.
-- Release archive content verification.
+- Reproducible release archive creation.
+- SHA-256 manifest validation.
+- Archive member, permission, ownership, timestamp, path, and gzip-header
+  validation.
+- A second packaging pass whose checksums must match the first pass.
 - Packaged ASN loading from an unrelated working directory.
 
 ## License
@@ -383,5 +455,7 @@ See:
 - [`LICENSING.md`](LICENSING.md) — component-level licensing policy.
 - [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) — provenance,
   attribution, dependency, vendored-header, and external-data notices.
+- [`SECURITY.md`](SECURITY.md) — supported versions and private vulnerability
+  reporting process.
 
 A single licence must not be assumed to apply to every file in this repository.
