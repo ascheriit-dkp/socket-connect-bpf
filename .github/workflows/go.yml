@@ -29,6 +29,13 @@ jobs:
           cache: true
           cache-dependency-path: go.sum
 
+      - name: Check shell script syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          bash -n updateASData.sh scripts/*.sh
+
       - name: Update AS data
         run: ./updateASData.sh
 
@@ -261,59 +268,29 @@ jobs:
           bash scripts/test-kernel-filters.sh \
             ./bin/amd64/socket-connect-bpf
 
-      - name: Create release artifacts
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          mkdir -p bin/amd64/as
-          mkdir -p bin/arm64/as
-          mkdir -p artifacts
-
-          for architecture in amd64 arm64; do
-            cp README.md "bin/${architecture}/"
-            cp LICENSE "bin/${architecture}/"
-            cp LICENSING.md "bin/${architecture}/"
-            cp THIRD_PARTY_NOTICES.md "bin/${architecture}/"
-            cp as/*.tsv "bin/${architecture}/as/"
-          done
-
-          tar czf \
-            artifacts/socket-connect-bpf-linux-amd64.tar.gz \
-            --directory=bin/amd64/ \
-            .
-
-          tar czf \
-            artifacts/socket-connect-bpf-linux-arm64.tar.gz \
-            --directory=bin/arm64/ \
-            .
+      - name: Create reproducible release artifacts
+        run: make release-artifacts
 
       - name: Verify release artifacts
+        run: make verify-release-artifacts
+
+      - name: Verify reproducible packaging
         shell: bash
         run: |
           set -euo pipefail
 
-          for architecture in amd64 arm64; do
-            archive="artifacts/socket-connect-bpf-linux-${architecture}.tar.gz"
-            contents="$(tar tzf "${archive}")"
+          cp \
+            artifacts/SHA256SUMS \
+            /tmp/socket-connect-bpf-SHA256SUMS.first
 
-            for required_file in \
-              "./socket-connect-bpf" \
-              "./README.md" \
-              "./LICENSE" \
-              "./LICENSING.md" \
-              "./THIRD_PARTY_NOTICES.md" \
-              "./as/ip2asn-v4-u32.tsv" \
-              "./as/ip2asn-v6.tsv"
-            do
-              if ! grep -Fxq "${required_file}" <<<"${contents}"; then
-                echo "${archive} is missing ${required_file}"
-                echo "--- archive contents ---"
-                printf '%s\n' "${contents}"
-                exit 1
-              fi
-            done
-          done
+          make release-artifacts
+
+          diff \
+            --unified \
+            /tmp/socket-connect-bpf-SHA256SUMS.first \
+            artifacts/SHA256SUMS
+
+          make verify-release-artifacts
 
       - name: Test packaged ASN loading
         shell: bash
