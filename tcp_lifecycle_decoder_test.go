@@ -17,12 +17,11 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
-	"reflect"
 	"strings"
 	"testing"
 )
 
-func TestDecodeKernelTCPLifecycleEvent(t *testing.T) {
+func TestDecodeKernelTCPLifecycleEventRoundTrip(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -30,10 +29,6 @@ func TestDecodeKernelTCPLifecycleEvent(t *testing.T) {
 		event kernelTCPLifecycleEvent
 	}{
 		{
- {
-		name  string
-		event kernelTCPLifecycleEvent
-	}{
 			name:  "IPv4 attempt",
 			event: validIPv4TCPLifecycleAttempt(),
 		},
@@ -45,8 +40,7 @@ func TestDecodeKernelTCPLifecycleEvent(t *testing.T) {
 			name: "established",
 			event: func() kernelTCPLifecycleEvent {
 				event := validIPv4TCPLifecycleAttempt()
-				event.EventType =
-					kernelTCPLifecycleEventTypeEstablished
+				event.EventType = kernelTCPLifecycleEventTypeEstablished
 				event.KernelTimestampNS = 1_500
 				event.EstablishedTimestampNS = 1_500
 
@@ -57,11 +51,9 @@ func TestDecodeKernelTCPLifecycleEvent(t *testing.T) {
 			name: "failed",
 			event: func() kernelTCPLifecycleEvent {
 				event := validIPv4TCPLifecycleAttempt()
-				event.EventType =
-					kernelTCPLifecycleEventTypeConnectFailed
+				event.EventType = kernelTCPLifecycleEventTypeConnectFailed
 				event.KernelTimestampNS = 1_250
-				event.FailureSource =
-					kernelTCPLifecycleFailureSourceTCPState
+				event.FailureSource = kernelTCPLifecycleFailureSourceTCPState
 
 				return event
 			}(),
@@ -70,8 +62,7 @@ func TestDecodeKernelTCPLifecycleEvent(t *testing.T) {
 			name: "closed",
 			event: func() kernelTCPLifecycleEvent {
 				event := validIPv4TCPLifecycleAttempt()
-				event.EventType =
-					kernelTCPLifecycleEventTypeClosed
+				event.EventType = kernelTCPLifecycleEventTypeClosed
 				event.KernelTimestampNS = 3_000
 				event.EstablishedTimestampNS = 1_500
 
@@ -86,19 +77,14 @@ func TestDecodeKernelTCPLifecycleEvent(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 
-			rawSample := encodeKernelTCPLifecycleEvent(
-				t,
-				test.event,
-			)
+			rawSample := encodeKernelTCPLifecycleEvent(t, test.event)
 
-			got, err := decodeKernelTCPLifecycleEvent(
-				rawSample,
-			)
+			got, err := decodeKernelTCPLifecycleEvent(rawSample)
 			if err != nil {
 				t.Fatalf("decoding event: %v", err)
 			}
 
-			if !reflect.DeepEqual(got, test.event) {
+			if got != test.event {
 				t.Fatalf(
 					"decoded event = %#v; want %#v",
 					got,
@@ -109,9 +95,7 @@ func TestDecodeKernelTCPLifecycleEvent(t *testing.T) {
 	}
 }
 
-func TestDecodeKernelTCPLifecycleEventRejectsRecordSizes(
-	t *testing.T,
-) {
+func TestDecodeKernelTCPLifecycleEventRejectsRecordSizes(t *testing.T) {
 	t.Parallel()
 
 	validRecord := encodeKernelTCPLifecycleEvent(
@@ -128,18 +112,12 @@ func TestDecodeKernelTCPLifecycleEventRejectsRecordSizes(
 			rawSample: nil,
 		},
 		{
-			name: "one byte short",
-			rawSample: append(
-				[]byte(nil),
-				validRecord[:len(validRecord)-1]...,
-			),
+			name:      "one byte short",
+			rawSample: append([]byte(nil), validRecord[:len(validRecord)-1]...),
 		},
 		{
-			name: "one byte long",
-			rawSample: append(
-				append([]byte(nil), validRecord...),
-				0,
-			),
+			name:      "one byte long",
+			rawSample: append(append([]byte(nil), validRecord...), 0),
 		},
 	}
 
@@ -149,9 +127,7 @@ func TestDecodeKernelTCPLifecycleEventRejectsRecordSizes(
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 
-			got, err := decodeKernelTCPLifecycleEvent(
-				test.rawSample,
-			)
+			got, err := decodeKernelTCPLifecycleEvent(test.rawSample)
 			if err == nil {
 				t.Fatal("decoding succeeded; want an error")
 			}
@@ -167,18 +143,13 @@ func TestDecodeKernelTCPLifecycleEventRejectsRecordSizes(
 			}
 
 			if got != (kernelTCPLifecycleEvent{}) {
-				t.Fatalf(
-					"event = %#v; want zero value",
-					got,
-				)
+				t.Fatalf("event = %#v; want zero value", got)
 			}
 		})
 	}
 }
 
-func TestDecodeKernelTCPLifecycleEventRejectsInvalidRecord(
-	t *testing.T,
-) {
+func TestDecodeKernelTCPLifecycleEventRejectsInvalidRecords(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -210,8 +181,7 @@ func TestDecodeKernelTCPLifecycleEventRejectsInvalidRecord(
 		{
 			name: "missing remote port",
 			mutate: func(event *kernelTCPLifecycleEvent) {
-				event.Flags &^=
-					kernelTCPLifecycleFlagRemotePort
+				event.Flags &^= kernelTCPLifecycleFlagRemotePort
 				event.RemotePort = 0
 			},
 			errorText: "has no remote port",
@@ -234,13 +204,8 @@ func TestDecodeKernelTCPLifecycleEventRejectsInvalidRecord(
 			event := validIPv4TCPLifecycleAttempt()
 			test.mutate(&event)
 
-			rawSample := encodeKernelTCPLifecycleEvent(
-				t,
-				event,
-			)
-
 			got, err := decodeKernelTCPLifecycleEvent(
-				rawSample,
+				encodeKernelTCPLifecycleEvent(t, event),
 			)
 			if err == nil {
 				t.Fatal("decoding succeeded; want an error")
@@ -265,30 +230,9 @@ func TestDecodeKernelTCPLifecycleEventRejectsInvalidRecord(
 			}
 
 			if got != (kernelTCPLifecycleEvent{}) {
-				t.Fatalf(
-					"event = %#v; want zero value",
-					got,
-				)
+				t.Fatalf("event = %#v; want zero value", got)
 			}
 		})
-	}
-}
-
-func TestKernelTCPLifecycleEncodingSize(t *testing.T) {
-	t.Parallel()
-
-	rawSample := encodeKernelTCPLifecycleEvent(
-		t,
-		validIPv4TCPLifecycleAttempt(),
-	)
-
-	if got := len(rawSample); got !=
-		kernelTCPLifecycleEventBinarySize {
-		t.Fatalf(
-			"encoded size = %d; want %d",
-			got,
-			kernelTCPLifecycleEventBinarySize,
-		)
 	}
 }
 
@@ -306,6 +250,14 @@ func encodeKernelTCPLifecycleEvent(
 		event,
 	); err != nil {
 		t.Fatalf("encoding TCP lifecycle event: %v", err)
+	}
+
+	if got := buffer.Len(); got != kernelTCPLifecycleEventBinarySize {
+		t.Fatalf(
+			"encoded size = %d; want %d",
+			got,
+			kernelTCPLifecycleEventBinarySize,
+		)
 	}
 
 	return buffer.Bytes()
