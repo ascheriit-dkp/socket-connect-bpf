@@ -31,10 +31,6 @@ func decodeKernelTCPLifecycleEvent(
 ) (kernelTCPLifecycleEvent, error) {
 	var event kernelTCPLifecycleEvent
 
-	ifSample []byte,
-) (kernelTCPLifecycleEvent, error) {
-	var event kernelTCPLifecycleEvent
-
 	if len(rawSample) != kernelTCPLifecycleEventBinarySize {
 		return event, fmt.Errorf(
 			"unexpected TCP lifecycle record size %d; want %d",
@@ -54,7 +50,10 @@ func decodeKernelTCPLifecycleEvent(
 		)
 	}
 
-	if err := validateKernelTCPLifecycleEvent(event); err != nil {
+	if err := validateKernelTCPLifecycleEvent(eventevent,
+	); err != nil {
+		return kernelTCPLifecycleEvent{}, fmt.Errorf(
+			"decode TCP); err != nil {
 		return kernelTCPLifecycleEvent{}, fmt.Errorf(
 			"validate TCP lifecycle kernel event: %w",
 			err,
