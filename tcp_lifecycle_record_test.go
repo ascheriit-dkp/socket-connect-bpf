@@ -67,9 +67,7 @@ func TestDecodeTCPLifecycleEventPayload(t *testing.T) {
 		"established timestamp",
 		got.EstablishedTimestampNS,
 		uint64Pointer(1_500),
-	established timestamp",
-		got.EstablishedTimestampNS,
-		uint64)
+	)
 	assertOptionalUint64(
 		t,
 		"connect latency",
