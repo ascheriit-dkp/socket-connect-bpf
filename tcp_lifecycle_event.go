@@ -351,6 +351,14 @@ func validateKernelTCPLifecycleEvent(
 			)
 		}
 
+		if event.EstablishedTimestampNS < event.AttemptTimestampNS {
+			return fmt.Errorf(
+				"TCP established timestamp %d is before attempt timestamp %d",
+				event.EstablishedTimestampNS,
+				event.AttemptTimestampNS,
+			)
+		}
+
 		if event.EstablishedTimestampNS >
 			event.KernelTimestampNS {
 			return fmt.Errorf(
@@ -444,13 +452,6 @@ func validateTCPLifecyclePort(
 		}
 
 		return nil
-	}
-
-	if port == 0 {
-		return fmt.Errorf(
-			"TCP lifecycle %s port is present but zero",
-			name,
-		)
 	}
 
 	return nil
