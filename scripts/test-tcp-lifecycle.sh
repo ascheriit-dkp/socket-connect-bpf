@@ -149,6 +149,23 @@ def matching(remote_ip, remote_port):
     ]
 
 
+def require_local_endpoint(event, expected_ip, event_name):
+    local = event.get("local", {})
+
+    if local.get("ip") != expected_ip:
+        raise SystemExit(
+            f"{event_name} event did not expose local IP {expected_ip}: "
+            f"{local.get('ip')!r}"
+        )
+
+    local_port = local.get("port")
+    if not isinstance(local_port, int) or local_port <= 0:
+        raise SystemExit(
+            f"{event_name} event did not expose a valid local port: "
+            f"{local_port!r}"
+        )
+
+
 def require_success(remote_ip, remote_port, family):
     candidates = matching(remote_ip, remote_port)
     if not candidates:
@@ -200,6 +217,9 @@ def require_success(remote_ip, remote_port, family):
                 raise SystemExit(
                     f"invalid connection duration for {remote_ip}:{remote_port}"
                 )
+
+            require_local_endpoint(established, remote_ip, "established")
+            require_local_endpoint(closed, remote_ip, "closed")
 
             return
 
