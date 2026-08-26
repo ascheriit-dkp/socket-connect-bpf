@@ -9,7 +9,9 @@ on:
       - 'main.go'
       - 'securitySocketConnectSrc.c'
       - 'tcp_lifecycle_*.go'
+      - 'tcp_lifecycle_*.h'
       - 'scripts/test-tcp-lifecycle.sh'
+      - 'scripts/test-tcp-lifecycle-filters.sh'
 
 permissions:
   contents: read
@@ -41,4 +43,11 @@ jobs:
         run: |
           set -euo pipefail
           bash scripts/test-tcp-lifecycle.sh \
+            ./bin/amd64/socket-connect-bpf
+
+      - name: Run TCP lifecycle filter tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/test-tcp-lifecycle-filters.sh \
             ./bin/amd64/socket-connect-bpf
