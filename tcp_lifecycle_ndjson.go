@@ -45,7 +45,7 @@ type tcpLifecycleNDJSONEvent struct {
 	Process              tcpLifecycleNDJSONProcess  `json:"process"`
 	Local                tcpLifecycleNDJSONEndpoint `json:"local"`
 	Remote               tcpLifecycleNDJSONEndpoint `json:"remote"`
-	ASN                   *tcpLifecycleNDJSONASN     `json:"asn,omitempty"`
+	ASN                  *tcpLifecycleNDJSONASN     `json:"asn,omitempty"`
 	Result               string                     `json:"result,omitempty"`
 	FailureSource        string                     `json:"failure_source,omitempty"`
 	Errno                *int32                     `json:"errno,omitempty"`
