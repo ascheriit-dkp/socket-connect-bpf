@@ -45,6 +45,7 @@ type tcpLifecycleNDJSONEvent struct {
 	Process              tcpLifecycleNDJSONProcess  `json:"process"`
 	Local                tcpLifecycleNDJSONEndpoint `json:"local"`
 	Remote               tcpLifecycleNDJSONEndpoint `json:"remote"`
+	ASN                   *tcpLifecycleNDJSONASN     `json:"asn,omitempty"`
 	Result               string                     `json:"result,omitempty"`
 	FailureSource        string                     `json:"failure_source,omitempty"`
 	Errno                *int32                     `json:"errno,omitempty"`
@@ -54,14 +55,22 @@ type tcpLifecycleNDJSONEvent struct {
 }
 
 type tcpLifecycleNDJSONProcess struct {
-	PID  uint32 `json:"pid"`
-	UID  uint32 `json:"uid"`
-	Comm string `json:"comm,omitempty"`
+	PID        uint32 `json:"pid"`
+	UID        uint32 `json:"uid"`
+	Comm       string `json:"comm,omitempty"`
+	Executable string `json:"executable,omitempty"`
+	Arguments  string `json:"arguments,omitempty"`
+	User       string `json:"user,omitempty"`
 }
 
 type tcpLifecycleNDJSONEndpoint struct {
 	IP   string  `json:"ip,omitempty"`
 	Port *uint16 `json:"port,omitempty"`
+}
+
+type tcpLifecycleNDJSONASN struct {
+	Number uint32 `json:"number"`
+	Name   string `json:"name,omitempty"`
 }
 
 func newTCPLifecycleNDJSONOutputWithWriter(
@@ -105,12 +114,22 @@ func newTCPLifecycleNDJSONEvent(
 		Protocol:          event.Protocol,
 		AddressFamily:     event.AddressFamily,
 		Process: tcpLifecycleNDJSONProcess{
-			PID:  event.PID,
-			UID:  event.UID,
-			Comm: event.Comm,
+			PID:        event.PID,
+			UID:        event.UID,
+			Comm:       event.Comm,
+			Executable: event.ProcessPath,
+			Arguments:  event.ProcessArgs,
+			User:       event.User,
 		},
 		Local:  newTCPLifecycleNDJSONEndpoint(event.Local),
 		Remote: newTCPLifecycleNDJSONEndpoint(event.Remote),
+	}
+
+	if event.ASN != nil {
+		jsonEvent.ASN = &tcpLifecycleNDJSONASN{
+			Number: event.ASN.Number,
+			Name:   event.ASN.Name,
+		}
 	}
 
 	switch event.EventType {
