@@ -14,7 +14,10 @@
 
 package main
 
-import "flag"
+import (
+	"flag"
+	"strconv"
+)
 
 var tcpLifecycleFlag = flag.Bool(
 	"tcp-lifecycle",
@@ -33,4 +36,14 @@ func selectedOutputFormat() string {
 	}
 
 	return outputFlag.Value.String()
+}
+
+func selectedExtendedOutput() bool {
+	extendedFlag := flag.Lookup("a")
+	if extendedFlag == nil {
+		return false
+	}
+
+	value, err := strconv.ParseBool(extendedFlag.Value.String())
+	return err == nil && value
 }
