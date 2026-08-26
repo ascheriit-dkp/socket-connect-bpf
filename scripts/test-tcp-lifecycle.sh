@@ -39,6 +39,8 @@ sudo timeout \
     "${binary}" \
     --tcp-lifecycle \
     --output ndjson \
+    -a \
+    --asn-dir as \
     >"${output}" \
     2>"${log}" &
 tracer_pid=$!
@@ -84,6 +86,7 @@ python3 - \
     "${ipv4_port}" \
     "${ipv6_port}" \
     "${refused_port}" <<'PY'
+import collections
 import json
 import pathlib
 import sys
@@ -139,6 +142,38 @@ for line_number, line in enumerate(lines, start=1):
 
     events.append(event)
 
+all_by_connection = {}
+for event in events:
+    all_by_connection.setdefault(event["connection_id"], []).append(event)
+
+for connection_id, connection_events in all_by_connection.items():
+    event_type_counts = collections.Counter(
+        event["event_type"]
+        for event in connection_events
+    )
+
+    for event_type, count in event_type_counts.items():
+        if count > 1:
+            raise SystemExit(
+                f"connection {connection_id} emitted {event_type} {count} times"
+            )
+
+    if (
+        event_type_counts["tcp_established"]
+        and event_type_counts["tcp_connect_failed"]
+    ):
+        raise SystemExit(
+            f"connection {connection_id} emitted both established and failed"
+        )
+
+    if (
+        event_type_counts["tcp_closed"]
+        and not event_type_counts["tcp_established"]
+    ):
+        raise SystemExit(
+            f"connection {connection_id} closed without establishment"
+        )
+
 
 def matching(remote_ip, remote_port):
     return [
@@ -164,6 +199,22 @@ def require_local_endpoint(event, expected_ip, event_name):
             f"{event_name} event did not expose a valid local port: "
             f"{local_port!r}"
         )
+
+
+def require_extended_process_fields(connection_events):
+    for event in connection_events:
+        process = event.get("process", {})
+        if (
+            process.get("comm") == "curl"
+            and process.get("executable")
+            and process.get("arguments")
+            and process.get("user")
+        ):
+            return
+
+    raise SystemExit(
+        "lifecycle -a output did not preserve executable, arguments and user"
+    )
 
 
 def require_success(remote_ip, remote_port, family):
@@ -220,6 +271,7 @@ def require_success(remote_ip, remote_port, family):
 
             require_local_endpoint(established, remote_ip, "established")
             require_local_endpoint(closed, remote_ip, "closed")
+            require_extended_process_fields(connection_events)
 
             return
 
@@ -250,6 +302,26 @@ for connection_events in failed_by_connection.values():
         )
         if failed.get("result") != "failed":
             raise SystemExit("failed lifecycle event did not report failed result")
+
+        failure_source = failed.get("failure_source")
+        if failure_source not in {
+            "connect_return",
+            "tcp_state",
+            "socket_error",
+        }:
+            raise SystemExit(
+                f"unexpected lifecycle failure source: {failure_source!r}"
+            )
+
+        errno = failed.get("errno")
+        if errno is not None and (not isinstance(errno, int) or errno <= 0):
+            raise SystemExit(
+                f"lifecycle failure errno was not positive: {errno!r}"
+            )
+
+        if errno is not None and not failed.get("error"):
+            raise SystemExit("lifecycle failure errno had no error message")
+
         break
 else:
     raise SystemExit("no complete attempt/failure lifecycle found")
