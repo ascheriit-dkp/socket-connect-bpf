@@ -25,6 +25,8 @@ import (
 	"github.com/ascheriit-dkp/socket-connect-bpf/linux"
 )
 
+const maxTCPLifecycleEnrichmentEntries = 65536
+
 type tcpLifecycleEnrichment struct {
 	ProcessPath string
 	ProcessArgs string
@@ -32,25 +34,61 @@ type tcpLifecycleEnrichment struct {
 	ASN         *tcpLifecycleASNPayload
 }
 
+type tcpLifecycleEnrichmentLookups struct {
+	processPath func(int) string
+	processArgs func(int) string
+	username    func(uint32) string
+	asn         func(tcpLifecycleEventPayload) *tcpLifecycleASNPayload
+}
+
 type tcpLifecycleEnricher struct {
 	includeExtendedFields bool
+	maxEntries            int
 	connections           map[uint64]tcpLifecycleEnrichment
+	lookups               tcpLifecycleEnrichmentLookups
 }
 
 func newTCPLifecycleEnricher(
 	includeExtendedFields bool,
 ) *tcpLifecycleEnricher {
+	return newTCPLifecycleEnricherWithLookups(
+		includeExtendedFields,
+		maxTCPLifecycleEnrichmentEntries,
+		defaultTCPLifecycleEnrichmentLookups(),
+	)
+}
+
+func newTCPLifecycleEnricherWithLookups(
+	includeExtendedFields bool,
+	maxEntries int,
+	lookups tcpLifecycleEnrichmentLookups,
+) *tcpLifecycleEnricher {
+	if maxEntries < 0 {
+		maxEntries = 0
+	}
+
 	return &tcpLifecycleEnricher{
 		includeExtendedFields: includeExtendedFields,
+		maxEntries:            maxEntries,
 		connections:           make(map[uint64]tcpLifecycleEnrichment),
+		lookups:               lookups,
+	}
+}
+
+func defaultTCPLifecycleEnrichmentLookups() tcpLifecycleEnrichmentLookups {
+	return tcpLifecycleEnrichmentLookups{
+		processPath: linux.ProcessPathForPid,
+		processArgs: linux.ProcessArgsForPid,
+		username:    lookupTCPLifecycleUsername,
+		asn:         lookupTCPLifecycleASN,
 	}
 }
 
 func (enricher *tcpLifecycleEnricher) Enrich(
 	payload tcpLifecycleEventPayload,
 ) tcpLifecycleEventPayload {
-	enrichment, ok := enricher.connections[payload.ConnectionID]
-	if !ok {
+	enrichment, cached := enricher.connections[payload.ConnectionID]
+	if !cached {
 		enrichment = enricher.lookup(payload)
 	}
 
@@ -64,7 +102,9 @@ func (enricher *tcpLifecycleEnricher) Enrich(
 		tcpLifecycleEventTypeClosed:
 		delete(enricher.connections, payload.ConnectionID)
 	default:
-		enricher.connections[payload.ConnectionID] = enrichment
+		if cached || len(enricher.connections) < enricher.maxEntries {
+			enricher.connections[payload.ConnectionID] = enrichment
+		}
 	}
 
 	return payload
@@ -75,22 +115,28 @@ func (enricher *tcpLifecycleEnricher) lookup(
 ) tcpLifecycleEnrichment {
 	pid := int(payload.PID)
 	enrichment := tcpLifecycleEnrichment{
-		ProcessPath: linux.ProcessPathForPid(pid),
-		User:        strconv.FormatUint(uint64(payload.UID), 10),
-	}
-
-	if userInfo, err := user.LookupId(enrichment.User); err == nil {
-		enrichment.User = userInfo.Username
+		ProcessPath: enricher.lookups.processPath(pid),
+		User:        enricher.lookups.username(payload.UID),
 	}
 
 	if !enricher.includeExtendedFields {
 		return enrichment
 	}
 
-	enrichment.ProcessArgs = linux.ProcessArgsForPid(pid)
-	enrichment.ASN = lookupTCPLifecycleASN(payload)
+	enrichment.ProcessArgs = enricher.lookups.processArgs(pid)
+	enrichment.ASN = enricher.lookups.asn(payload)
 
 	return enrichment
+}
+
+func lookupTCPLifecycleUsername(uid uint32) string {
+	uidText := strconv.FormatUint(uint64(uid), 10)
+
+	if userInfo, err := user.LookupId(uidText); err == nil {
+		return userInfo.Username
+	}
+
+	return uidText
 }
 
 func lookupTCPLifecycleASN(
