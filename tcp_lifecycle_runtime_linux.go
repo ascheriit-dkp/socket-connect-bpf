@@ -92,13 +92,15 @@ func setupTCPLifecycleWorkers(filters kernelFilterOptions) {
 		log.Fatal(err)
 	}
 
+	enricher := newTCPLifecycleEnricher(selectedExtendedOutput())
+
 	go func() {
 		<-stopper
 		log.Println("received signal, exiting program")
 		closeRingBufferReader(reader)
 	}()
 
-	readTCPLifecycleEvents(reader, lifecycleOutput)
+	readTCPLifecycleEvents(reader, lifecycleOutput, enricher)
 	closeRingBufferReader(reader)
 	closeTCPLifecycleLinks(links)
 
@@ -191,6 +193,7 @@ func closeTCPLifecycleLinks(links []link.Link) {
 func readTCPLifecycleEvents(
 	reader *ringbuf.Reader,
 	output tcpLifecycleOutput,
+	enricher *tcpLifecycleEnricher,
 ) {
 	var record ringbuf.Record
 
@@ -212,6 +215,8 @@ func readTCPLifecycleEvents(
 			log.Printf("processing TCP lifecycle event: %s", err)
 			continue
 		}
+
+		payload = enricher.Enrich(payload)
 
 		if err := output.WriteEvent(payload); err != nil {
 			log.Printf("writing TCP lifecycle event: %s", err)
