@@ -102,7 +102,7 @@ func lookupTCPLifecycleASN(
 
 	if payload.Remote.IP.To4() != nil {
 		info := as.GetASInfoIPv4(payload.Remote.IP)
-		if info == (as.ASInfo{}) {
+		if info.AsNumber == 0 {
 			return nil
 		}
 
@@ -114,7 +114,7 @@ func lookupTCPLifecycleASN(
 
 	if payload.Remote.IP.To16() != nil {
 		info := as.GetASInfoIPv6(payload.Remote.IP)
-		if info == (as.ASInfo{}) {
+		if info.AsNumber == 0 {
 			return nil
 		}
 
