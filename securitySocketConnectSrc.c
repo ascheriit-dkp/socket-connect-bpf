@@ -975,4 +975,6 @@ int kprobe_tcp_set_state(struct pt_regs *ctx) {
     return 0;
 }
 
+#include "tcp_lifecycle_tracepoint.h"
+
 char LICENSE[] SEC("license") = "Dual MIT/GPL";
