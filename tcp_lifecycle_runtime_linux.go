@@ -156,11 +156,12 @@ func attachTCPLifecyclePrograms(objs *bpfObjects) ([]link.Link, error) {
 			},
 		},
 		{
-			name: "tcp_set_state kprobe",
+			name: "inet_sock_set_state tracepoint",
 			attach: func() (link.Link, error) {
-				return link.Kprobe(
-					"tcp_set_state",
-					objs.KprobeTcpSetState,
+				return link.Tracepoint(
+					"sock",
+					"inet_sock_set_state",
+					objs.TracepointInetSockSetState,
 					nil,
 				)
 			},
