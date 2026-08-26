@@ -43,17 +43,19 @@ func (output *tcpLifecycleTableOutput) PrintHeader() error {
 
 	if _, err := fmt.Fprintf(
 		output.writer,
-		"%-9s %-20s %-6s %-16s %-40s %-40s %-8s %-24s %-12s %-12s\n",
+		"%-9s %-20s %-6s %-32s %-16s %-40s %-40s %-8s %-24s %-12s %-12s %s\n",
 		"TIME",
 		"EVENT",
 		"PID",
 		"PROCESS",
+		"USER",
 		"LOCAL",
 		"REMOTE",
 		"RESULT",
 		"ERROR",
 		"CONNECT_NS",
 		"DURATION_NS",
+		"AS-INFO",
 	); err != nil {
 		return fmt.Errorf("write TCP lifecycle table header: %w", err)
 	}
@@ -74,17 +76,19 @@ func (output *tcpLifecycleTableOutput) WriteEvent(
 
 	if _, err := fmt.Fprintf(
 		output.writer,
-		"%-9s %-20s %-6d %-16s %-40s %-40s %-8s %-24s %-12s %-12s\n",
+		"%-9s %-20s %-6d %-32s %-16s %-40s %-40s %-8s %-24s %-12s %-12s %s\n",
 		event.ObservedAt.Format(tcpLifecycleTableTimeLayout),
 		sanitizeTerminalField(event.EventType),
 		event.PID,
-		sanitizeTerminalField(event.Comm),
+		formatTCPLifecycleTableProcess(event),
+		sanitizeTerminalField(formatTCPLifecycleTableOptionalText(event.User)),
 		sanitizeTerminalField(formatTCPLifecycleTableEndpoint(event.Local)),
 		sanitizeTerminalField(formatTCPLifecycleTableEndpoint(event.Remote)),
 		result,
 		formatTCPLifecycleTableError(event.Error),
 		formatTCPLifecycleTableOptionalUint64(event.ConnectLatencyNS),
 		formatTCPLifecycleTableOptionalUint64(event.ConnectionDurationNS),
+		formatTCPLifecycleTableASN(event.ASN),
 	); err != nil {
 		return fmt.Errorf("write TCP lifecycle table event: %w", err)
 	}
@@ -107,6 +111,24 @@ func tcpLifecycleTableResult(eventType string) (string, error) {
 			eventType,
 		)
 	}
+}
+
+func formatTCPLifecycleTableProcess(
+	event tcpLifecycleEventPayload,
+) string {
+	process := event.ProcessPath
+	if process == "" {
+		process = event.Comm
+	}
+
+	if event.ProcessArgs != "" {
+		if process != "" {
+			process += " "
+		}
+		process += event.ProcessArgs
+	}
+
+	return sanitizeTerminalField(formatTCPLifecycleTableOptionalText(process))
 }
 
 func formatTCPLifecycleTableEndpoint(
@@ -138,10 +160,31 @@ func formatTCPLifecycleTableError(value string) string {
 	return sanitizeTerminalField(value)
 }
 
+func formatTCPLifecycleTableOptionalText(value string) string {
+	if value == "" {
+		return "-"
+	}
+
+	return value
+}
+
 func formatTCPLifecycleTableOptionalUint64(value *uint64) string {
 	if value == nil {
 		return "-"
 	}
 
 	return strconv.FormatUint(*value, 10)
+}
+
+func formatTCPLifecycleTableASN(value *tcpLifecycleASNPayload) string {
+	if value == nil {
+		return "-"
+	}
+
+	text := "AS" + strconv.FormatUint(uint64(value.Number), 10)
+	if value.Name != "" {
+		text += " (" + value.Name + ")"
+	}
+
+	return sanitizeTerminalField(text)
 }
