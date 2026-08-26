@@ -56,17 +56,17 @@ func benchmarkTCPLifecyclePayload() tcpLifecycleEventPayload {
 	connectLatency := uint64(500)
 
 	return tcpLifecycleEventPayload{
-		ObservedAt:              time.Unix(1_800_000_000, 123_456_789).UTC(),
-		EventType:               tcpLifecycleEventTypeEstablished,
-		Protocol:                tcpLifecycleProtocolTCP,
-		AddressFamily:           "AF_INET",
-		ConnectionID:            42,
-		KernelTimestampNS:       1_500,
-		AttemptTimestampNS:      1_000,
+		ObservedAt:             time.Unix(1_800_000_000, 123_456_789).UTC(),
+		EventType:              tcpLifecycleEventTypeEstablished,
+		Protocol:               tcpLifecycleProtocolTCP,
+		AddressFamily:          "AF_INET",
+		ConnectionID:           42,
+		KernelTimestampNS:      1_500,
+		AttemptTimestampNS:     1_000,
 		EstablishedTimestampNS: &establishedTimestamp,
-		PID:                     1234,
-		UID:                     1000,
-		Comm:                    "curl",
+		PID:                    1234,
+		UID:                    1000,
+		Comm:                   "curl",
 		Local: tcpLifecycleEndpointPayload{
 			IP:   net.IPv4(192, 0, 2, 10).To4(),
 			Port: &localPort,
