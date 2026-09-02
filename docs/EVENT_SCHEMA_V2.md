@@ -21,7 +21,7 @@ Every schema version 2 record contains:
 - `observed_at`: userspace UTC observation timestamp in RFC 3339 format.
 - `kernel_timestamp_ns`: monotonic kernel timestamp for the event.
 - `protocol`: `tcp`.
-- `address_family`: address-family name such as `AF_INET` or `AF_INET6`.
+- `address_family`: `AF_INET` or `AF_INET6` for the current lifecycle mode.
 - `process`: initiating process metadata.
 - `local`: local endpoint object.
 - `remote`: remote endpoint object.
@@ -31,13 +31,35 @@ and must not be assumed stable across tracer restarts.
 
 ## Process object
 
-The `process` object contains:
+The `process` object always contains:
 
 - `pid`: initiating process ID.
 - `uid`: initiating user ID.
-- `comm`: task command name when available.
 
-Additional process-enrichment fields may be added compatibly in the future.
+It may also contain:
+
+- `comm`: task command name when available.
+- `executable`: resolved executable path when userspace enrichment succeeds.
+- `user`: resolved user name, or the numeric UID when name lookup fails.
+
+When `-a` is enabled it may additionally contain:
+
+- `arguments`: command-line arguments captured from the initiating process.
+
+Process metadata is cached by `connection_id` after the attempt so later
+lifecycle events preserve attribution even when the initiating process exits
+before establishment or closure is observed. The cache is bounded.
+
+## ASN object
+
+When `-a` is enabled and the remote address matches the loaded IP-to-ASN data,
+a top-level `asn` object may be emitted:
+
+- `number`: autonomous-system number.
+- `name`: autonomous-system name when available.
+
+ASN enrichment is optional. Absence of a match is represented by omission of
+the `asn` field.
 
 ## Endpoint objects
 
@@ -50,9 +72,12 @@ An endpoint component that was not observed is omitted. A port that was
 observed with the numeric value `0` is emitted as `0`; omission and zero are not
 interchangeable.
 
-The remote endpoint is required for valid lifecycle records. The local endpoint
-may be incomplete on an initial attempt and may be omitted when the kernel hook
-does not expose it reliably.
+The remote endpoint is required for valid lifecycle records.
+
+The initial `connect_attempt` may omit the local endpoint because the kernel may
+not have selected the final source address and ephemeral port yet.
+`tcp_established` and `tcp_closed` include the observed local and remote TCP
+tuple when the kernel exposes it through the TCP state tracepoint.
 
 ## `connect_attempt`
 
@@ -82,7 +107,7 @@ Additional fields:
 Example:
 
 ```json
-{"schema_version":2,"event_type":"tcp_established","connection_id":42,"observed_at":"2026-08-26T12:00:00.001Z","kernel_timestamp_ns":1500,"protocol":"tcp","address_family":"AF_INET","process":{"pid":1234,"uid":1000,"comm":"curl"},"local":{},"remote":{"ip":"198.51.100.20","port":443},"result":"success","connect_latency_ns":500}
+{"schema_version":2,"event_type":"tcp_established","connection_id":42,"observed_at":"2026-08-26T12:00:00.001Z","kernel_timestamp_ns":1500,"protocol":"tcp","address_family":"AF_INET","process":{"pid":1234,"uid":1000,"comm":"curl"},"local":{"ip":"192.0.2.10","port":40000},"remote":{"ip":"198.51.100.20","port":443},"result":"success","connect_latency_ns":500}
 ```
 
 ## `tcp_connect_failed`
@@ -120,8 +145,15 @@ Additional field:
 Example:
 
 ```json
-{"schema_version":2,"event_type":"tcp_closed","connection_id":42,"observed_at":"2026-08-26T12:00:01Z","kernel_timestamp_ns":5000,"protocol":"tcp","address_family":"AF_INET","process":{"pid":1234,"uid":1000,"comm":"curl"},"local":{},"remote":{"ip":"198.51.100.20","port":443},"connection_duration_ns":3500}
+{"schema_version":2,"event_type":"tcp_closed","connection_id":42,"observed_at":"2026-08-26T12:00:01Z","kernel_timestamp_ns":5000,"protocol":"tcp","address_family":"AF_INET","process":{"pid":1234,"uid":1000,"comm":"curl"},"local":{"ip":"192.0.2.10","port":40000},"remote":{"ip":"198.51.100.20","port":443},"connection_duration_ns":3500}
 ```
+
+## Filtering semantics
+
+Existing PID, UID, family, and destination-port filters are evaluated for the
+initial connection attempt. Only accepted attempts create lifecycle correlation
+state. Later lifecycle events inherit that original decision rather than being
+re-filtered in a potentially different execution context.
 
 ## Compatibility rules
 
