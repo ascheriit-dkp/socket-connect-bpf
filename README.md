@@ -1,291 +1,206 @@
 # socket-connect-bpf
 
-socket-connect-bpf is a lightweight Linux command-line utility that records
-process-aware outbound socket connection attempts using eBPF.
+socket-connect-bpf is a lightweight Linux command-line tracer for
+process-aware outbound socket activity using eBPF.
 
-It can produce either a human-readable table or newline-delimited JSON
+It supports two collection modes:
+
+- the compatibility mode, which reports outbound connection attempts exactly as
+  the existing v2 interface does;
+- TCP lifecycle mode, enabled explicitly with `--tcp-lifecycle`, which follows
+  outbound IPv4 and IPv6 TCP connections from attempt through establishment,
+  failure, and closure.
+
+Both modes can produce a human-readable table or newline-delimited JSON
 (NDJSON).
 
 ![socket-connect-bpf while making a request with curl](samples/socket-connect-bpf.gif)
 
-See additional [sample output](samples/socket-connect-bpf-example.txt).
+## TCP lifecycle mode
 
-## Details
+Enable lifecycle tracking with:
 
-socket-connect-bpf attaches an eBPF kernel probe to
-[`security_socket_connect`](https://github.com/torvalds/linux/blob/master/include/linux/security.h).
+    sudo ./socket-connect-bpf --tcp-lifecycle
 
-Each emitted event represents a connection attempt observed at that hook. It
-does not prove that the connection later succeeded.
+Lifecycle mode emits four event types:
 
-Connections using `AF_UNSPEC` and `AF_UNIX` are explicitly excluded.
+- `connect_attempt`
+- `tcp_established`
+- `tcp_connect_failed`
+- `tcp_closed`
 
-Kernel events use a fixed internal ABI and are delivered to userspace through
-one shared BPF ring buffer. IPv4, IPv6, and supported non-IP address families
-therefore use the same event stream and decoder.
+Events belonging to the same tracked TCP connection share one opaque
+`connection_id` for the duration of the tracer process.
 
-Optional PID, UID, address-family, and destination-port filters are evaluated
-inside the eBPF program before matching events are submitted to the ring
-buffer. This reduces ring-buffer traffic and avoids unnecessary userspace
-enrichment for rejected events.
+Successful connections expose connect latency and, after closure, established
+connection duration. Established and closed events include the observed local
+and remote TCP tuple when available.
 
-Each internal event includes a monotonic kernel timestamp. The public NDJSON
-schema version 1 continues to expose `observed_at` as the userspace observation
-time for compatibility.
+Use lifecycle NDJSON with:
 
-The following information is reported when available:
+    sudo ./socket-connect-bpf \
+      --tcp-lifecycle \
+      --output ndjson
 
-| Name        | Description                                      | Sample             |
-|-------------|--------------------------------------------------|--------------------|
-| Time        | Time at which the event was received.            | `17:15:58`         |
-| AF          | Address family.                                  | `AF_INET`          |
-| PID         | Process ID that attempted the connection.        | `8549`             |
-| Process     | Process path or command-line arguments.          | `/usr/bin/curl`    |
-| User        | User running the process.                        | `root`             |
-| Destination | Destination IP address and port.                 | `127.0.0.1 53`     |
-| AS-Info     | Autonomous-system information for the address.   | `AS36459 (GITHUB)` |
+Lifecycle NDJSON uses schema version `2`. The complete contract is documented
+in [TCP lifecycle contract](docs/TCP_LIFECYCLE.md) and
+[NDJSON Event Schema v2](docs/EVENT_SCHEMA_V2.md).
 
-## Use cases
+### Compatibility
 
-socket-connect-bpf can help with tasks such as:
+Without `--tcp-lifecycle`, existing behavior is unchanged:
 
-- Identifying unexpected outbound communication.
-- Checking whether an application contains analytics or telemetry.
-- Observing network activity from trusted dependencies.
-- Investigating which process attempted a particular connection.
-- Feeding process-aware connection events into scripts or log pipelines.
-- Limiting collection to selected processes, users, address families, or
-  destination ports.
+- collection remains attempt-only;
+- the existing table format remains unchanged;
+- NDJSON remains schema version `1`;
+- existing PID, UID, family, and destination-port filter semantics remain
+  unchanged.
 
-## System requirements
+The attempt-only NDJSON contract is documented in
+[NDJSON Event Schema v1](docs/EVENT_SCHEMA_V1.md).
 
-- Linux
-- Linux kernel 5.8 or later, or a vendor kernel with equivalent BPF ring-buffer
-  support
-- x86-64/amd64 or AArch64/arm64 CPU
-- Root privileges or equivalent permissions for loading and attaching eBPF
-  programs
+## How lifecycle tracking works
 
-## Installation
+The lifecycle implementation uses bounded eBPF correlation maps and one shared
+ring buffer.
 
-### Release archive
+Outbound TCP attempts are captured for IPv4 and IPv6. Later TCP state changes
+are correlated with the initiating attempt so the tracer can distinguish a
+successful establishment from a terminal failure and can report closure after
+establishment.
 
-Download and extract the archive matching the target architecture:
+The initiating process identity and the filter decision are preserved for later
+lifecycle events. Later kernel state transitions are not re-attributed to a
+process that merely happens to execute the transition.
 
-- `socket-connect-bpf-linux-amd64.tar.gz`
-- `socket-connect-bpf-linux-arm64.tar.gz`
+The tracer does not expose raw kernel socket pointers. `connection_id` is an
+opaque per-run identifier.
 
-The extracted directory contains:
+## Output
 
-- `socket-connect-bpf`
-- `as/ip2asn-v4-u32.tsv`
-- `as/ip2asn-v6.tsv`
-- `README.md`
-- `LICENSE`
-- `LICENSING.md`
-- `THIRD_PARTY_NOTICES.md`
-- `SECURITY.md`
+### Attempt-only table
 
-Keep the executable and its accompanying `as` directory together when using
-autonomous-system enrichment.
-
-### Release verification
-
-Each release includes a `SHA256SUMS` manifest containing the SHA-256 digest of
-both Linux archives.
-
-Download `SHA256SUMS` and both archives into the same directory, then run:
-
-    sha256sum --check SHA256SUMS
-
-A successful verification reports:
-
-    socket-connect-bpf-linux-amd64.tar.gz: OK
-    socket-connect-bpf-linux-arm64.tar.gz: OK
-
-To verify only the amd64 archive:
-
-    grep ' socket-connect-bpf-linux-amd64.tar.gz$' SHA256SUMS |
-      sha256sum --check -
-
-To verify only the arm64 archive:
-
-    grep ' socket-connect-bpf-linux-arm64.tar.gz$' SHA256SUMS |
-      sha256sum --check -
-
-Do not run an archive whose checksum does not match the published manifest.
-
-The SHA-256 manifest verifies that downloaded bytes match the bytes published
-with the release. It is not currently a cryptographic signature and does not
-independently authenticate the repository owner.
-
-Release archives are created deterministically. For the same source commit,
-toolchain, dependencies, generated sources, and ASN datasets, repeated
-packaging should produce identical archive checksums.
-
-The release verifier also checks:
-
-- The exact set of archive members.
-- File and directory types.
-- Executable and documentation permissions.
-- Normalized user and group ownership.
-- Normalized archive timestamps.
-- Absence of absolute paths and parent-directory traversal.
-- Absence of optional filename and timestamp metadata in the gzip header.
-- The integrity of the complete compressed stream.
-
-## Running
-
-Run the tracer with human-readable table output:
+Run the compatibility table output with:
 
     sudo ./socket-connect-bpf
 
-The default output does not include process arguments or autonomous-system
-information.
+The existing table reports information such as observation time, address
+family, process, user, destination, and optional autonomous-system metadata.
 
-Running without any filter options preserves the unfiltered behavior.
+### Lifecycle table
 
-### Kernel-side filtering
-
-Connection-attempt events can be filtered by:
-
-- Process ID with `--pid`.
-- User ID with `--uid`.
-- Address-family category with `--family`.
-- Destination port with `--port`.
-
-Each filter option may be specified more than once.
-
-Filter one process:
-
-    sudo ./socket-connect-bpf --pid 1234
-
-Filter connections from UID `1000`:
-
-    sudo ./socket-connect-bpf --uid 1000
-
-Filter IPv4 connections:
-
-    sudo ./socket-connect-bpf --family ipv4
-
-Filter HTTPS destination ports:
-
-    sudo ./socket-connect-bpf --port 443
-
-Combine several categories:
+Run the lifecycle table with:
 
     sudo ./socket-connect-bpf \
-      --uid 1000 \
-      --family ipv4 \
-      --port 80 \
-      --port 443
+      --tcp-lifecycle \
+      --output table
 
-Values within the same category use OR semantics. For example:
+The lifecycle table includes the event type, process, user, local and remote
+endpoints, result, error, connect latency, connection duration, and optional
+ASN information.
 
-    sudo ./socket-connect-bpf \
-      --pid 1234 \
-      --pid 5678
-
-matches either PID `1234` or PID `5678`.
-
-Different categories use AND semantics. For example:
-
-    sudo ./socket-connect-bpf \
-      --uid 1000 \
-      --port 443
-
-matches only events whose UID is `1000` and whose destination port is `443`.
-
-The supported address-family values are:
-
-| Value   | Matching events                                  |
-|---------|--------------------------------------------------|
-| `ipv4`  | `AF_INET` events                                 |
-| `ipv6`  | `AF_INET6` events                                |
-| `other` | Supported non-IP families other than UNIX/UNSPEC |
-
-Address-family values are case-sensitive.
-
-When a destination-port filter is active, supported non-IP events do not
-match because they do not contain a destination port.
-
-Duplicate values are accepted and treated as one value.
-
-The initial implementation supports at most 1024 distinct PID values, 1024
-distinct UID values, and 1024 distinct destination-port values.
-
-Invalid filter values cause startup to fail before the eBPF probe is attached.
-
-The complete behavior and compatibility contract is documented in
-[Kernel-side filter contract](docs/KERNEL_FILTERS.md).
-
-### NDJSON output
-
-Write one JSON object per event:
+### Attempt-only NDJSON
 
     sudo ./socket-connect-bpf --output ndjson
 
-Filters can be combined with NDJSON output:
+This emits schema version `1` and `connect_attempt` events only.
+
+### Lifecycle NDJSON
 
     sudo ./socket-connect-bpf \
-      --family ipv6 \
-      --port 443 \
+      --tcp-lifecycle \
       --output ndjson
 
-The NDJSON schema currently uses schema version `1` and reports
-`connect_attempt` events.
+This emits schema version `2` and never mixes version 1 and version 2 records in
+the same stream.
 
-Filtering does not alter the event structure or NDJSON schema.
+Diagnostics and errors are written to standard error rather than mixed into the
+NDJSON stream.
 
-The public compatibility contract is documented in
-[NDJSON Event Schema v1](docs/EVENT_SCHEMA_V1.md).
+## Extended information
 
-Diagnostics and errors are written to standard error rather than mixed into
-the NDJSON stream.
-
-### Extended information
-
-Use `-a` to include process arguments and autonomous-system information:
+Use `-a` to include additional process information and autonomous-system
+metadata:
 
     sudo ./socket-connect-bpf -a
 
-The option can also be combined with NDJSON output and filters:
+It can be combined with lifecycle mode:
 
     sudo ./socket-connect-bpf \
+      --tcp-lifecycle \
       -a \
-      --uid 1000 \
       --output ndjson
 
-### Event-loss reporting
+Lifecycle mode caches initiating-process enrichment by `connection_id` in a
+bounded userspace cache so later establishment or closure events can preserve
+metadata for short-lived processes.
 
-The BPF program counts events that matched all configured filters but could not
-be submitted because the shared ring buffer had no available space.
+## Kernel-side filtering
 
-Events intentionally rejected by filters are not counted as lost events.
+The tracer supports kernel-side filters for:
 
-When the tracer shuts down, it writes a summary to standard error:
+- process ID with `--pid`;
+- user ID with `--uid`;
+- address-family category with `--family`;
+- destination port with `--port`.
+
+Each option may be repeated.
+
+Example:
+
+    sudo ./socket-connect-bpf \
+      --tcp-lifecycle \
+      --uid 1000 \
+      --family ipv4 \
+      --port 80 \
+      --port 443 \
+      --output ndjson
+
+Values inside one category use OR semantics. Different categories use AND
+semantics.
+
+Supported family values are:
+
+| Value | Matching events |
+| --- | --- |
+| `ipv4` | `AF_INET` |
+| `ipv6` | `AF_INET6` |
+| `other` | Supported non-IP families in attempt-only mode |
+
+Lifecycle mode currently tracks outbound IPv4 and IPv6 TCP connections.
+
+The filter decision is made at the initiating attempt. Only accepted attempts
+create lifecycle correlation state, and later lifecycle events inherit that
+decision.
+
+The complete filter contract is documented in
+[Kernel-side filter contract](docs/KERNEL_FILTERS.md).
+
+## Event loss and lifecycle diagnostics
+
+The shared ring buffer counts matching events that could not be submitted
+because space was unavailable.
+
+At shutdown the tracer reports:
 
     ring-buffer event loss summary: total=0
 
-A non-zero value means matching connection attempts were observed by the probe
-but could not be delivered to userspace.
+Lifecycle mode also reports bounded-correlation diagnostics:
+
+    TCP lifecycle diagnostic summary: map_update_failures=0 missing_correlation=0 unsupported_observations=0
+
+Non-zero diagnostic values indicate that one or more lifecycle observations
+could not be correlated or represented reliably. They are diagnostics, not
+fabricated public lifecycle events.
 
 ## Autonomous-system data
 
 Autonomous-system enrichment uses datasets from
 [IPtoASN](https://iptoasn.com/).
 
-ASN datasets are loaded only when `-a` is enabled.
+Datasets are loaded only when `-a` is enabled.
 
-### Default dataset location
-
-By default, socket-connect-bpf loads the following directory beside the real
-executable:
-
-    as/
-
-This means the tracer can be launched from any working directory as long as
-the release layout remains intact:
+By default the tracer loads an `as/` directory beside the resolved executable:
 
     package/
     ├── socket-connect-bpf
@@ -293,37 +208,24 @@ the release layout remains intact:
         ├── ip2asn-v4-u32.tsv
         └── ip2asn-v6.tsv
 
-Symbolic links to the executable are resolved before locating the default
-dataset directory.
-
-### Custom dataset location
-
-Override the default directory with `--asn-dir`:
+Override the directory with:
 
     sudo ./socket-connect-bpf \
       -a \
       --asn-dir /var/lib/socket-connect-bpf/as
 
-Relative paths supplied through `--asn-dir` are resolved from the current
-working directory.
+When `-a` is enabled, missing or malformed ASN data causes startup to fail with
+a descriptive error.
 
-The specified directory must contain:
-
-    ip2asn-v4-u32.tsv
-    ip2asn-v6.tsv
-
-When `-a` is enabled, missing or malformed ASN datasets cause startup to fail
-with a descriptive error. Running without `-a` does not require the datasets.
-
-### Updating datasets
-
-To download current datasets while developing from the repository:
+Developers can refresh the datasets with:
 
     ./updateASData.sh
 
-Local ASN lookup requires additional memory, especially for the IPv6 dataset.
-
 ## Command-line options
+
+    --tcp-lifecycle
+        Track outbound IPv4 and IPv6 TCP attempts, establishment, failures,
+        and closure. Lifecycle NDJSON uses schema version 2.
 
     -a
         Include process arguments and autonomous-system information.
@@ -336,106 +238,148 @@ Local ASN lookup requires additional memory, especially for the IPv6 dataset.
 
     --asn-dir DIRECTORY
         Load ASN datasets from DIRECTORY instead of the as directory beside
-        the executable. This option is used when -a is enabled.
+        the executable. Used when -a is enabled.
 
     --pid PID
-        Emit events whose process ID matches PID. PID must be an unsigned
-        decimal value greater than zero. May be repeated.
+        Emit events whose initiating process ID matches PID. May be repeated.
 
     --uid UID
-        Emit events whose user ID matches UID. UID must be an unsigned decimal
-        value. UID 0 is valid. May be repeated.
+        Emit events whose initiating user ID matches UID. UID 0 is valid.
+        May be repeated.
 
     --family FAMILY
-        Emit events matching FAMILY. Supported values are ipv4, ipv6 and
-        other. Values are case-sensitive. May be repeated.
+        Emit events matching ipv4, ipv6, or other. May be repeated.
 
     --port PORT
-        Emit IPv4 or IPv6 events whose destination port matches PORT. PORT
-        must be from 1 through 65535. May be repeated.
+        Emit IPv4 or IPv6 events whose destination port matches PORT.
+        PORT must be from 1 through 65535. May be repeated.
+
+## System requirements
+
+- Linux
+- Linux kernel 5.8 or later, or a vendor kernel with equivalent BPF ring-buffer
+  support
+- x86-64/amd64 or AArch64/arm64
+- privileges required to load and attach eBPF programs
+
+The lifecycle integration suite runs on Ubuntu 24.04 in GitHub Actions and
+exercises real IPv4 and IPv6 TCP connections.
+
+## Installation
+
+Release archives are produced for:
+
+- `socket-connect-bpf-linux-amd64.tar.gz`
+- `socket-connect-bpf-linux-arm64.tar.gz`
+
+Each archive contains the executable, ASN datasets, documentation, and
+licensing files.
+
+Keep the executable and its accompanying `as` directory together when using
+ASN enrichment.
+
+### Release verification
+
+Each release includes `SHA256SUMS`.
+
+Verify downloaded archives with:
+
+    sha256sum --check SHA256SUMS
+
+Release archives are created deterministically and the CI verifies archive
+members, permissions, ownership, timestamps, paths, gzip metadata, checksums,
+and a second reproducible packaging pass.
 
 ## Development
 
-### Build from the repository
+Clone the repository and work from the v2 branch:
 
-The following example uses Debian Bookworm with Linux kernel 6.5:
-
-    # Install Go 1.23 or later.
-    sudo snap install --classic go
-
-    # Install Clang 16.
-    sudo apt install clang-16
-
-    # Clone the fork.
     git clone https://github.com/ascheriit-dkp/socket-connect-bpf.git
-
     cd socket-connect-bpf
     git switch v2
 
+Refresh ASN data when required, then build and test:
+
+    ./updateASData.sh
     make all
 
-The build produces binaries for amd64 and arm64 under `bin/`.
+The build produces amd64 and arm64 binaries under `bin/`.
 
-### Tests
-
-Run generation, builds, and all Go tests:
-
-    make all
-
-Run only the Go tests:
+Run Go tests directly with:
 
     go test ./...
 
-Run the live kernel-filter integration suite after building:
+Run the existing live kernel-filter suite with:
 
     bash scripts/test-kernel-filters.sh \
       ./bin/amd64/socket-connect-bpf
 
-The live integration suite requires Linux, root privileges through `sudo`, and
-the ability to attach the eBPF probe.
+Run the TCP lifecycle suites with:
 
-### Local release artifacts
+    bash scripts/test-tcp-lifecycle.sh \
+      ./bin/amd64/socket-connect-bpf
 
-Build binaries, run the Go tests, create the release archives, generate
-`SHA256SUMS`, and verify the resulting artifacts:
+    bash scripts/test-tcp-lifecycle-filters.sh \
+      ./bin/amd64/socket-connect-bpf
+
+    bash scripts/test-tcp-lifecycle-table.sh \
+      ./bin/amd64/socket-connect-bpf
+
+The live suites require Linux, suitable eBPF privileges through `sudo`, and the
+ability to attach the required probes and tracepoint.
+
+### Lifecycle coverage
+
+The lifecycle CI validates real kernel behavior including:
+
+- IPv4 establishment and closure;
+- IPv6 establishment and closure;
+- refused connections;
+- positive errno representation when available;
+- local and remote endpoint extraction;
+- connect latency and established duration;
+- duplicate terminal-event suppression;
+- initiating-process enrichment preservation;
+- PID, UID, family, and port filtering;
+- NDJSON schema version 2;
+- lifecycle table output;
+- clean shutdown, ring-buffer loss reporting, and lifecycle diagnostics.
+
+The normal Go workflow additionally retains the existing generation, formatting,
+unit-test, integration, benchmark, static-analysis, and reproducible release
+checks.
+
+## Release artifacts
+
+Build binaries, tests, release archives, `SHA256SUMS`, and verification with:
 
     make release
 
-Create the archives from existing binaries without rebuilding:
+Create archives from existing binaries with:
 
     make release-artifacts
 
-Verify existing files under `artifacts/`:
+Verify existing release files with:
 
     make verify-release-artifacts
 
-The release scripts use the latest Git commit timestamp by default. A specific
-timestamp can be supplied for reproducible packaging:
+## Scope and limitations
 
-    SOURCE_DATE_EPOCH=1700000000 make release-artifacts
+TCP lifecycle mode is intentionally limited to outbound IPv4 and IPv6 TCP
+connections initiated after the tracer attaches.
 
-The generated files are:
+It does not claim application-layer success and does not currently trace:
 
-    artifacts/socket-connect-bpf-linux-amd64.tar.gz
-    artifacts/socket-connect-bpf-linux-arm64.tar.gz
-    artifacts/SHA256SUMS
+- inbound accepted TCP connections;
+- listening sockets;
+- UDP lifecycles;
+- individual packets;
+- TCP retransmissions;
+- congestion-control state;
+- per-packet latency.
 
-GitHub Actions additionally performs:
-
-- Shell-script syntax validation.
-- Real unfiltered table-output tracing.
-- Real unfiltered NDJSON tracing and schema validation.
-- Live PID, UID, address-family, and destination-port filtering tests.
-- OR-semantics and AND-semantics filter tests.
-- Filtered table and NDJSON exclusion checks.
-- NDJSON schema v1 contract tests.
-- Event-loss summary validation.
-- Reproducible release archive creation.
-- SHA-256 manifest validation.
-- Archive member, permission, ownership, timestamp, path, and gzip-header
-  validation.
-- A second packaging pass whose checksums must match the first pass.
-- Packaged ASN loading from an unrelated working directory.
+See [TCP lifecycle contract](docs/TCP_LIFECYCLE.md) for the detailed semantic
+contract and failure/correlation rules.
 
 ## License
 
@@ -444,18 +388,11 @@ This repository contains components under different licensing terms.
 - The inherited Go code and newly authored v2 Go/userspace code, tests,
   workflows, scripts, and documentation are licensed under the Apache License,
   Version 2.0 unless a file states otherwise.
-- The inherited BPF source retains its upstream provenance and its
-  kernel-facing `Dual MIT/GPL` declaration.
+- The inherited BPF source retains its upstream provenance and kernel-facing
+  `Dual MIT/GPL` declaration.
 - Vendored headers, Go dependencies, compact kernel headers, and ASN data
   retain their own licensing terms.
 
-See:
-
-- [`LICENSE`](LICENSE) — Apache License, Version 2.0.
-- [`LICENSING.md`](LICENSING.md) — component-level licensing policy.
-- [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) — provenance,
-  attribution, dependency, vendored-header, and external-data notices.
-- [`SECURITY.md`](SECURITY.md) — supported versions and private vulnerability
-  reporting process.
-
-A single licence must not be assumed to apply to every file in this repository.
+See [`LICENSE`](LICENSE), [`LICENSING.md`](LICENSING.md),
+[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md), and
+[`SECURITY.md`](SECURITY.md).

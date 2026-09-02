@@ -160,6 +160,11 @@ func loadASNData(asnDirectory string) error {
 }
 
 func setupWorkers(filters kernelFilterOptions) {
+	if tcpLifecycleEnabled() {
+		setupTCPLifecycleWorkers(filters)
+		return
+	}
+
 	const fn = "security_socket_connect"
 
 	stopper := make(chan os.Signal, 1)
