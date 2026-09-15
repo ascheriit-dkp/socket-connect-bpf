@@ -41,6 +41,7 @@ func TestUDPNDJSONSchemaV3(t *testing.T) {
 	if event["event_type"] != udpEventTypeSend || event["protocol"] != udpProtocol {
 		t.Fatalf("unexpected event identity: %#v", event)
 	}
+
 	process, ok := event["process"].(map[string]any)
 	if !ok {
 		t.Fatalf("process = %#v", event["process"])
@@ -48,9 +49,14 @@ func TestUDPNDJSONSchemaV3(t *testing.T) {
 	if process["pid"] != float64(1234) || process["uid"] != float64(1000) {
 		t.Fatalf("unexpected process: %#v", process)
 	}
-	if process["cgroup_id"] != float64(99) {
-		t.Fatalf("cgroup_id = %#v", process["cgroup_id"])
+	if process["executable"] != "/usr/bin/sender" || process["user"] != "alice" {
+		t.Fatalf("unexpected process enrichment: %#v", process)
 	}
+	cgroup, ok := process["cgroup"].(map[string]any)
+	if !ok || cgroup["id"] != float64(99) {
+		t.Fatalf("unexpected cgroup: %#v", process["cgroup"])
+	}
+
 	remote, ok := event["remote"].(map[string]any)
 	if !ok {
 		t.Fatalf("remote = %#v", event["remote"])
@@ -60,6 +66,9 @@ func TestUDPNDJSONSchemaV3(t *testing.T) {
 	}
 	if _, exists := event["result"]; exists {
 		t.Fatal("UDP send must not contain a result field")
+	}
+	if _, exists := event["connection_id"]; exists {
+		t.Fatal("UDP send must not contain a connection_id field")
 	}
 }
 
@@ -100,6 +109,7 @@ func TestNewUDPOutputForFormat(t *testing.T) {
 
 func testUDPEventPayload() udpEventPayload {
 	port := uint16(5353)
+	cgroupID := uint64(99)
 	return udpEventPayload{
 		ObservedAt:        time.Date(2026, 9, 15, 20, 0, 0, 123, time.UTC),
 		EventType:         udpEventTypeSend,
@@ -110,6 +120,11 @@ func testUDPEventPayload() udpEventPayload {
 		UID:               1000,
 		CgroupID:          99,
 		Comm:              "sender",
+		ProcessPath:       "/usr/bin/sender",
+		User:              "alice",
+		Cgroup: &tcpLifecycleCgroupPayload{
+			ID: &cgroupID,
+		},
 		Remote: tcpLifecycleEndpointPayload{
 			IP:   net.ParseIP("192.0.2.25").To4(),
 			Port: &port,
