@@ -65,9 +65,9 @@ func TestParseProcessCgroupPath(t *testing.T) {
 			want:  "/user.slice/user-1000.slice/session-2.scope",
 		},
 		{
-			name: "prefer unified hierarchy",
+			name:  "prefer unified hierarchy",
 			value: "2:cpu:/legacy\n0::/unified\n",
-			want: "/unified",
+			want:  "/unified",
 		},
 		{
 			name:  "cgroup v1 fallback",
