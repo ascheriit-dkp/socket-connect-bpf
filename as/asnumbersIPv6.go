@@ -180,10 +180,10 @@ func parseIPv6ASNumber(
 		return 0, fmt.Errorf(
 			"parse IPv6 ASN data %q at record %d: invalid AS number %q: %w",
 			asTsvFile,
-				recordNumber,
-				value,
-				err,
-			)
+			recordNumber,
+			value,
+			err,
+		)
 	}
 
 	return uint32(parsedValue), nil
