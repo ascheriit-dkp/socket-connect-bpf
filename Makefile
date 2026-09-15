@@ -56,6 +56,8 @@ clean:
 	go clean
 	rm -f bpf_*_bpfel.go bpf_*_bpfeb.go
 	rm -f bpf_*_bpfel.o bpf_*_bpfeb.o
+	rm -f udp_*_bpfel.go udp_*_bpfeb.go
+	rm -f udp_*_bpfel.o udp_*_bpfeb.o
 	rm -f $(AMD64_DIR)/$(BINARY_NAME)
 	rm -f $(ARM64_DIR)/$(BINARY_NAME)
 	rm -rf artifacts
