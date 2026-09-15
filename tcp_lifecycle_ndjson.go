@@ -55,12 +55,43 @@ type tcpLifecycleNDJSONEvent struct {
 }
 
 type tcpLifecycleNDJSONProcess struct {
-	PID        uint32 `json:"pid"`
-	UID        uint32 `json:"uid"`
-	Comm       string `json:"comm,omitempty"`
-	Executable string `json:"executable,omitempty"`
-	Arguments  string `json:"arguments,omitempty"`
-	User       string `json:"user,omitempty"`
+	PID            uint32                           `json:"pid"`
+	UID            uint32                           `json:"uid"`
+	GID            *uint32                          `json:"gid,omitempty"`
+	Comm           string                           `json:"comm,omitempty"`
+	Executable     string                           `json:"executable,omitempty"`
+	Arguments      string                           `json:"arguments,omitempty"`
+	User           string                           `json:"user,omitempty"`
+	StartTimeTicks *uint64                          `json:"start_time_ticks,omitempty"`
+	Parent         *tcpLifecycleNDJSONProcessParent `json:"parent,omitempty"`
+	Cgroup         *tcpLifecycleNDJSONCgroup        `json:"cgroup,omitempty"`
+	Namespaces     *tcpLifecycleNDJSONNamespaces    `json:"namespaces,omitempty"`
+	Container      *tcpLifecycleNDJSONContainer     `json:"container,omitempty"`
+}
+
+type tcpLifecycleNDJSONProcessParent struct {
+	PID            uint32  `json:"pid"`
+	StartTimeTicks *uint64 `json:"start_time_ticks,omitempty"`
+}
+
+type tcpLifecycleNDJSONCgroup struct {
+	ID   *uint64 `json:"id,omitempty"`
+	Path string  `json:"path,omitempty"`
+}
+
+type tcpLifecycleNDJSONNamespaces struct {
+	Cgroup uint64 `json:"cgroup,omitempty"`
+	IPC    uint64 `json:"ipc,omitempty"`
+	Mount  uint64 `json:"mnt,omitempty"`
+	Net    uint64 `json:"net,omitempty"`
+	PID    uint64 `json:"pid,omitempty"`
+	User   uint64 `json:"user,omitempty"`
+	UTS    uint64 `json:"uts,omitempty"`
+}
+
+type tcpLifecycleNDJSONContainer struct {
+	Runtime string `json:"runtime"`
+	ID      string `json:"id"`
 }
 
 type tcpLifecycleNDJSONEndpoint struct {
@@ -114,12 +145,18 @@ func newTCPLifecycleNDJSONEvent(
 		Protocol:          event.Protocol,
 		AddressFamily:     event.AddressFamily,
 		Process: tcpLifecycleNDJSONProcess{
-			PID:        event.PID,
-			UID:        event.UID,
-			Comm:       event.Comm,
-			Executable: event.ProcessPath,
-			Arguments:  event.ProcessArgs,
-			User:       event.User,
+			PID:            event.PID,
+			UID:            event.UID,
+			GID:            cloneUint32Pointer(event.GID),
+			Comm:           event.Comm,
+			Executable:     event.ProcessPath,
+			Arguments:      event.ProcessArgs,
+			User:           event.User,
+			StartTimeTicks: cloneUint64Pointer(event.ProcessStartTimeTicks),
+			Parent:         newTCPLifecycleNDJSONParent(event.Parent),
+			Cgroup:         newTCPLifecycleNDJSONCgroup(event.Cgroup),
+			Namespaces:     newTCPLifecycleNDJSONNamespaces(event.Namespaces),
+			Container:      newTCPLifecycleNDJSONContainer(event.Container),
 		},
 		Local:  newTCPLifecycleNDJSONEndpoint(event.Local),
 		Remote: newTCPLifecycleNDJSONEndpoint(event.Remote),
@@ -159,6 +196,63 @@ func newTCPLifecycleNDJSONEvent(
 	}
 
 	return jsonEvent, nil
+}
+
+func newTCPLifecycleNDJSONParent(
+	parent *tcpLifecycleProcessParentPayload,
+) *tcpLifecycleNDJSONProcessParent {
+	if parent == nil {
+		return nil
+	}
+
+	return &tcpLifecycleNDJSONProcessParent{
+		PID:            parent.PID,
+		StartTimeTicks: cloneUint64Pointer(parent.StartTimeTicks),
+	}
+}
+
+func newTCPLifecycleNDJSONCgroup(
+	cgroup *tcpLifecycleCgroupPayload,
+) *tcpLifecycleNDJSONCgroup {
+	if cgroup == nil {
+		return nil
+	}
+
+	return &tcpLifecycleNDJSONCgroup{
+		ID:   cloneUint64Pointer(cgroup.ID),
+		Path: cgroup.Path,
+	}
+}
+
+func newTCPLifecycleNDJSONNamespaces(
+	namespaces *tcpLifecycleNamespacesPayload,
+) *tcpLifecycleNDJSONNamespaces {
+	if namespaces == nil {
+		return nil
+	}
+
+	return &tcpLifecycleNDJSONNamespaces{
+		Cgroup: namespaces.Cgroup,
+		IPC:    namespaces.IPC,
+		Mount:  namespaces.Mount,
+		Net:    namespaces.Net,
+		PID:    namespaces.PID,
+		User:   namespaces.User,
+		UTS:    namespaces.UTS,
+	}
+}
+
+func newTCPLifecycleNDJSONContainer(
+	container *tcpLifecycleContainerPayload,
+) *tcpLifecycleNDJSONContainer {
+	if container == nil {
+		return nil
+	}
+
+	return &tcpLifecycleNDJSONContainer{
+		Runtime: container.Runtime,
+		ID:      container.ID,
+	}
 }
 
 func newTCPLifecycleNDJSONEndpoint(
