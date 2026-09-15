@@ -51,9 +51,13 @@ type tcpLifecycleEventPayload struct {
 	AttemptTimestampNS     uint64
 	EstablishedTimestampNS *uint64
 
-	PID  uint32
-	UID  uint32
-	Comm string
+	PID         uint32
+	UID         uint32
+	Comm        string
+	ProcessPath string
+	ProcessArgs string
+	User        string
+	ASN         *tcpLifecycleASNPayload
 
 	Local  tcpLifecycleEndpointPayload
 	Remote tcpLifecycleEndpointPayload
@@ -72,6 +76,11 @@ type tcpLifecycleEventPayload struct {
 type tcpLifecycleEndpointPayload struct {
 	IP   net.IP
 	Port *uint16
+}
+
+type tcpLifecycleASNPayload struct {
+	Number uint32
+	Name   string
 }
 
 func newTCPLifecycleEventPayload(

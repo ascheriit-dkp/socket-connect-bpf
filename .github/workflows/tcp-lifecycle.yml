@@ -1,0 +1,69 @@
+name: TCP lifecycle
+
+on:
+  pull_request:
+    branches:
+      - v2
+    paths:
+      - '.github/workflows/tcp-lifecycle.yml'
+      - 'main.go'
+      - 'securitySocketConnectSrc.c'
+      - 'tcp_lifecycle_*.go'
+      - 'tcp_lifecycle_*.h'
+      - 'scripts/test-tcp-lifecycle.sh'
+      - 'scripts/test-tcp-lifecycle-filters.sh'
+      - 'scripts/test-tcp-lifecycle-table.sh'
+      - 'scripts/test-tcp-lifecycle-async.sh'
+
+permissions:
+  contents: read
+
+jobs:
+  lifecycle:
+    name: Lifecycle smoke test
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Update AS data
+        run: ./updateASData.sh
+
+      - name: Generate, build and test
+        run: make all
+
+      - name: Run TCP lifecycle smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/test-tcp-lifecycle.sh \
+            ./bin/amd64/socket-connect-bpf
+
+      - name: Run TCP lifecycle filter tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/test-tcp-lifecycle-filters.sh \
+            ./bin/amd64/socket-connect-bpf
+
+      - name: Run TCP lifecycle table smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/test-tcp-lifecycle-table.sh \
+            ./bin/amd64/socket-connect-bpf
+
+      - name: Run asynchronous TCP lifecycle test
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/test-tcp-lifecycle-async.sh \
+            ./bin/amd64/socket-connect-bpf
