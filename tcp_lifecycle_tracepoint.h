@@ -216,4 +216,121 @@ int tracepoint_inet_sock_set_state(
     return 0;
 }
 
+#define PROCESS_EVENT_ABI_VERSION 1
+#define PROCESS_EVENT_EXEC 1
+#define PROCESS_EVENT_EXIT 2
+#define PROCESS_EVENT_RING_SIZE (1 << 18)
+#define PROCESS_DROPPED_EVENT_COUNTER_KEY 0
+
+struct process_event_t {
+    u16 abi_version;
+    u8 event_type;
+    u8 reserved0;
+    u32 tgid;
+    u32 tid;
+    u32 uid;
+    u32 gid;
+    u32 reserved1;
+    u64 kernel_timestamp_ns;
+    u64 cgroup_id;
+    char task[TASK_COMM_LEN];
+};
+
+_Static_assert(
+    sizeof(struct process_event_t) == 56,
+    "process_event_t must match the Go kernelProcessEvent size"
+);
+
+_Static_assert(
+    offsetof(struct process_event_t, tgid) == 4,
+    "unexpected process event tgid offset"
+);
+
+_Static_assert(
+    offsetof(struct process_event_t, kernel_timestamp_ns) == 24,
+    "unexpected process event timestamp offset"
+);
+
+_Static_assert(
+    offsetof(struct process_event_t, task) == 40,
+    "unexpected process event task offset"
+);
+
+struct
+{
+    __uint(type, BPF_MAP_TYPE_RINGBUF);
+    __uint(max_entries, PROCESS_EVENT_RING_SIZE);
+} process_events SEC(".maps");
+
+struct
+{
+    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+    __uint(max_entries, 1);
+    __type(key, u32);
+    __type(value, u64);
+} process_dropped_events SEC(".maps");
+
+static __always_inline void record_process_dropped_event(void) {
+    increment_per_cpu_counter(
+        &process_dropped_events,
+        PROCESS_DROPPED_EVENT_COUNTER_KEY
+    );
+}
+
+static __always_inline int emit_process_event(u8 event_type) {
+    u64 pid_tgid = bpf_get_current_pid_tgid();
+    u64 uid_gid = bpf_get_current_uid_gid();
+    u32 tgid = pid_tgid >> 32;
+    u32 tid = (u32)pid_tgid;
+    u32 uid = (u32)uid_gid;
+    u32 gid = uid_gid >> 32;
+
+    const struct filter_config_t *config = get_filter_config();
+    if (config != NULL && !matches_process_filters(config, tgid, uid)) {
+        return 0;
+    }
+
+    struct process_event_t event = {
+        .abi_version = PROCESS_EVENT_ABI_VERSION,
+        .event_type = event_type,
+        .tgid = tgid,
+        .tid = tid,
+        .uid = uid,
+        .gid = gid,
+        .kernel_timestamp_ns = bpf_ktime_get_ns(),
+        .cgroup_id = bpf_get_current_cgroup_id()
+    };
+
+    if (event.tgid == 0 || event.tid == 0) {
+        return 0;
+    }
+
+    if (bpf_get_current_comm(event.task, sizeof(event.task)) < 0) {
+        return 0;
+    }
+
+    if (bpf_ringbuf_output(
+        &process_events,
+        &event,
+        sizeof(event),
+        0
+    ) < 0) {
+        record_process_dropped_event();
+    }
+
+    return 0;
+}
+
+SEC("raw_tracepoint/sched_process_exec")
+int raw_tracepoint_sched_process_exec(void *ctx) {
+    (void)ctx;
+    return emit_process_event(PROCESS_EVENT_EXEC);
+}
+
+SEC("raw_tracepoint/sched_process_exit")
+int raw_tracepoint_sched_process_exit(void *ctx) {
+    (void)ctx;
+    return emit_process_event(PROCESS_EVENT_EXIT);
+}
+
 #endif

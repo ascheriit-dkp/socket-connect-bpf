@@ -76,35 +76,58 @@ func setupTCPLifecycleWorkers(filters kernelFilterOptions) {
 		log.Fatalf("creating TCP lifecycle ring-buffer reader: %s", err)
 	}
 
+	processReader, err := ringbuf.NewReader(objs.ProcessEvents)
+	if err != nil {
+		closeRingBufferReader(reader)
+		closeTCPLifecycleLinks(links)
+		log.Fatalf("creating process event ring-buffer reader: %s", err)
+	}
+
 	lifecycleOutput, err := newTCPLifecycleOutputForFormat(
 		selectedOutputFormat(),
 		os.Stdout,
 	)
 	if err != nil {
+		closeRingBufferReader(processReader)
 		closeRingBufferReader(reader)
 		closeTCPLifecycleLinks(links)
 		log.Fatal(err)
 	}
 
 	if err := lifecycleOutput.PrintHeader(); err != nil {
+		closeRingBufferReader(processReader)
 		closeRingBufferReader(reader)
 		closeTCPLifecycleLinks(links)
 		log.Fatal(err)
 	}
 
-	enricher := newTCPLifecycleEnricher(selectedExtendedOutput())
+	processes := newProcessCache(selectedExtendedOutput())
+	enricher := newTCPLifecycleEnricherWithProcessCache(
+		selectedExtendedOutput(),
+		processes,
+	)
+
+	processReaderDone := make(chan struct{})
+	go func() {
+		defer close(processReaderDone)
+		readProcessEvents(processReader, processes)
+	}()
 
 	go func() {
 		<-stopper
 		log.Println("received signal, exiting program")
 		closeRingBufferReader(reader)
+		closeRingBufferReader(processReader)
 	}()
 
 	readTCPLifecycleEvents(reader, lifecycleOutput, enricher)
 	closeRingBufferReader(reader)
+	closeRingBufferReader(processReader)
+	<-processReaderDone
 	closeTCPLifecycleLinks(links)
 
 	reportDroppedEvents(objs.DroppedEvents)
+	reportProcessDroppedEvents(objs.ProcessDroppedEvents)
 	reportTCPLifecycleDiagnostics(objs.LifecycleDiagnostics)
 }
 
@@ -164,6 +187,24 @@ func attachTCPLifecyclePrograms(objs *bpfObjects) ([]link.Link, error) {
 					objs.TracepointInetSockSetState,
 					nil,
 				)
+			},
+		},
+		{
+			name: "sched_process_exec raw tracepoint",
+			attach: func() (link.Link, error) {
+				return link.AttachRawTracepoint(link.RawTracepointOptions{
+					Name:    "sched_process_exec",
+					Program: objs.RawTracepointSchedProcessExec,
+				})
+			},
+		},
+		{
+			name: "sched_process_exit raw tracepoint",
+			attach: func() (link.Link, error) {
+				return link.AttachRawTracepoint(link.RawTracepointOptions{
+					Name:    "sched_process_exit",
+					Program: objs.RawTracepointSchedProcessExit,
+				})
 			},
 		},
 	}

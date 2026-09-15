@@ -46,16 +46,30 @@ type tcpLifecycleEnricher struct {
 	maxEntries            int
 	connections           map[uint64]tcpLifecycleEnrichment
 	lookups               tcpLifecycleEnrichmentLookups
+	processes             *processCache
 }
 
 func newTCPLifecycleEnricher(
 	includeExtendedFields bool,
 ) *tcpLifecycleEnricher {
-	return newTCPLifecycleEnricherWithLookups(
+	return newTCPLifecycleEnricherWithProcessCache(
+		includeExtendedFields,
+		nil,
+	)
+}
+
+func newTCPLifecycleEnricherWithProcessCache(
+	includeExtendedFields bool,
+	processes *processCache,
+) *tcpLifecycleEnricher {
+	enricher := newTCPLifecycleEnricherWithLookups(
 		includeExtendedFields,
 		maxTCPLifecycleEnrichmentEntries,
 		defaultTCPLifecycleEnrichmentLookups(),
 	)
+	enricher.processes = processes
+
+	return enricher
 }
 
 func newTCPLifecycleEnricherWithLookups(
@@ -114,16 +128,40 @@ func (enricher *tcpLifecycleEnricher) lookup(
 	payload tcpLifecycleEventPayload,
 ) tcpLifecycleEnrichment {
 	pid := int(payload.PID)
-	enrichment := tcpLifecycleEnrichment{
-		ProcessPath: enricher.lookups.processPath(pid),
-		User:        enricher.lookups.username(payload.UID),
+	enrichment := tcpLifecycleEnrichment{}
+	trackedProcess := false
+
+	if enricher.processes != nil {
+		snapshot, found, tracked := enricher.processes.Lookup(
+			payload.PID,
+			payload.UID,
+			payload.Comm,
+			payload.KernelTimestampNS,
+		)
+		trackedProcess = tracked
+		if found {
+			enrichment.ProcessPath = snapshot.Executable
+			enrichment.User = snapshot.User
+			if enricher.includeExtendedFields {
+				enrichment.ProcessArgs = snapshot.Arguments
+			}
+		}
+	}
+
+	if enrichment.ProcessPath == "" && !trackedProcess {
+		enrichment.ProcessPath = enricher.lookups.processPath(pid)
+	}
+	if enrichment.User == "" {
+		enrichment.User = enricher.lookups.username(payload.UID)
 	}
 
 	if !enricher.includeExtendedFields {
 		return enrichment
 	}
 
-	enrichment.ProcessArgs = enricher.lookups.processArgs(pid)
+	if enrichment.ProcessArgs == "" && !trackedProcess {
+		enrichment.ProcessArgs = enricher.lookups.processArgs(pid)
+	}
 	enrichment.ASN = enricher.lookups.asn(payload)
 
 	return enrichment
