@@ -9,7 +9,7 @@ The first version 3 event is `udp_send`.
 
 ## UDP semantics
 
-UDP does not have a TCP-style connection lifecycle. An `udp_send` event means
+UDP does not have a TCP-style connection lifecycle. A `udp_send` event means
 only that the kernel observed an outbound UDP send with an explicit destination
 address supplied through the send path used by `sendto` or `sendmsg`.
 
@@ -25,9 +25,21 @@ Connected UDP destination observation through `connect()` remains compatible
 with the existing attempt-only collection path. Version 3 adds visibility for
 unconnected per-datagram destinations.
 
+## Collection mode
+
+Enable expanded UDP visibility with:
+
+```text
+--udp
+```
+
+`--udp` and `--tcp-lifecycle` are intentionally mutually exclusive. This keeps
+each NDJSON stream on exactly one public schema version instead of mixing TCP
+schema version 2 and UDP schema version 3 records.
+
 ## Common UDP record
 
-An `udp_send` record contains:
+A `udp_send` record contains:
 
 - `schema_version`: integer `3`;
 - `event_type`: `udp_send`;
@@ -43,19 +55,42 @@ connection duration field for UDP sends.
 
 ## Process object
 
-The initial UDP event pipeline always provides:
+The `process` object always contains:
 
 - `pid`: thread-group ID of the sending process;
 - `uid`: real user ID observed by the BPF program.
 
-It may also provide:
+It may also contain the same additive process-attribution fields used by TCP
+lifecycle schema version 2:
 
+- `gid`: real group ID when userspace process context is available;
 - `comm`: kernel task command name;
-- `cgroup_id`: kernel cgroup ID when non-zero.
+- `executable`: resolved executable path;
+- `user`: resolved user name, or the numeric UID when name lookup fails;
+- `start_time_ticks`: Linux process start identity from `/proc/<pid>/stat`;
+- `parent`: parent PID and parent start identity;
+- `cgroup`: kernel cgroup ID and cgroup path when available;
+- `namespaces`: cgroup, IPC, mount, network, PID, user, and UTS namespace inode
+  identifiers;
+- `container`: best-effort container runtime and container ID inferred from the
+  cgroup path.
 
-Phase 5 runtime integration may add the same optional process-enrichment fields
-used by TCP lifecycle events. Such additions are compatible because consumers
-must ignore unknown optional fields.
+When `-a` is enabled, `arguments` may also be present.
+
+Process execution and exit are observed independently and cached in a bounded,
+PID-generation-aware userspace cache. This prevents a later process that reuses
+the same PID from being silently substituted for an earlier sender.
+
+Container metadata is best effort. The tracer does not contact a container
+runtime, Docker daemon, or Kubernetes API.
+
+## ASN object
+
+When `-a` is enabled and the remote IP matches the loaded offline ASN data, an
+optional top-level `asn` object may be emitted with:
+
+- `number`: autonomous-system number;
+- `name`: autonomous-system name when available.
 
 ## Remote endpoint
 
@@ -66,12 +101,25 @@ must ignore unknown optional fields.
 
 Both are required for a valid `udp_send` record. Sends without an explicit
 `msg_name` are not represented by this event because the destination is not
-present in the send request itself.
+present in the send request itself. For connected UDP, destination visibility
+continues to come from the existing `connect()` observation path.
+
+## Filtering
+
+PID, UID, family, and destination-port filters are applied in the UDP eBPF
+program before accepted events are submitted to the UDP ring buffer.
+
+Repeated values within one filter category use OR semantics. Different
+categories use AND semantics, matching the existing kernel-filter contract.
+
+UDP mode supports `ipv4` and `ipv6` family matches. `other` does not match a
+UDP version 3 event because the current UDP event contract is limited to
+explicit IPv4 and IPv6 destinations.
 
 ## Example
 
 ```json
-{"schema_version":3,"event_type":"udp_send","observed_at":"2026-09-15T20:00:00Z","kernel_timestamp_ns":123456,"protocol":"udp","address_family":"AF_INET","process":{"pid":1234,"uid":1000,"comm":"sender","cgroup_id":99},"remote":{"ip":"192.0.2.25","port":5353}}
+{"schema_version":3,"event_type":"udp_send","observed_at":"2026-09-15T20:00:00Z","kernel_timestamp_ns":123456,"protocol":"udp","address_family":"AF_INET","process":{"pid":1234,"uid":1000,"comm":"sender","executable":"/usr/bin/python3","user":"alice","cgroup":{"id":99,"path":"/user.slice/user-1000.slice/session-2.scope"}},"remote":{"ip":"192.0.2.25","port":5353}}
 ```
 
 ## Compatibility
