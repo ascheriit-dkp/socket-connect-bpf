@@ -21,13 +21,16 @@ import (
 	"strings"
 )
 
-const (
-	maxArgumentRedactionPatterns = 64
-	maxArgumentRedactionPatternLength = 1024
-	argumentRedactionReplacement = "[REDACTED]"
-)
+const maxArgumentRedactionPatterns = 64
+const maxArgumentRedactionPatternLength = 1024
+const argumentRedactionReplacement = "[REDACTED]"
 
 type argumentRedactionPatternValues []string
+
+var activeArgumentRedactor = &argumentRedactor{}
+var registeredArgumentRedactionPatterns = registerArgumentRedactionFlags(
+	flag.CommandLine,
+)
 
 func (values *argumentRedactionPatternValues) String() string {
 	if values == nil {
@@ -38,15 +41,20 @@ func (values *argumentRedactionPatternValues) String() string {
 }
 
 func (values *argumentRedactionPatternValues) Set(value string) error {
+	patterns := append(append([]string(nil), (*values)...), value)
+	redactor, err := newArgumentRedactor(patterns)
+	if err != nil {
+		return err
+	}
+
 	*values = append(*values, value)
+	activeArgumentRedactor = redactor
 	return nil
 }
 
 type argumentRedactor struct {
 	patterns []*regexp.Regexp
 }
-
-var activeArgumentRedactor = &argumentRedactor{}
 
 func registerArgumentRedactionFlags(
 	flagSet *flag.FlagSet,
@@ -58,16 +66,6 @@ func registerArgumentRedactionFlags(
 		"replace process-argument text matching REGEX with [REDACTED]; may be repeated",
 	)
 	return values
-}
-
-func configureArgumentRedaction(patterns []string) error {
-	redactor, err := newArgumentRedactor(patterns)
-	if err != nil {
-		return err
-	}
-
-	activeArgumentRedactor = redactor
-	return nil
 }
 
 func newArgumentRedactor(patterns []string) (*argumentRedactor, error) {
