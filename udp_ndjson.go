@@ -30,15 +30,15 @@ type udpNDJSONOutput struct {
 }
 
 type udpNDJSONEvent struct {
-	SchemaVersion     int                         `json:"schema_version"`
-	EventType         string                      `json:"event_type"`
-	ObservedAt        string                      `json:"observed_at"`
-	KernelTimestampNS uint64                      `json:"kernel_timestamp_ns"`
-	Protocol          string                      `json:"protocol"`
-	AddressFamily     string                      `json:"address_family"`
-	Process           tcpLifecycleNDJSONProcess   `json:"process"`
-	Remote            tcpLifecycleNDJSONEndpoint  `json:"remote"`
-	ASN               *tcpLifecycleNDJSONASN      `json:"asn,omitempty"`
+	SchemaVersion     int                        `json:"schema_version"`
+	EventType         string                     `json:"event_type"`
+	ObservedAt        string                     `json:"observed_at"`
+	KernelTimestampNS uint64                     `json:"kernel_timestamp_ns"`
+	Protocol          string                     `json:"protocol"`
+	AddressFamily     string                     `json:"address_family"`
+	Process           tcpLifecycleNDJSONProcess  `json:"process"`
+	Remote            tcpLifecycleNDJSONEndpoint `json:"remote"`
+	ASN               *tcpLifecycleNDJSONASN     `json:"asn,omitempty"`
 }
 
 func newUDPNDJSONOutputWithWriter(writer io.Writer) *udpNDJSONOutput {
