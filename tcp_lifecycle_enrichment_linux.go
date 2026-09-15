@@ -129,14 +129,17 @@ func (enricher *tcpLifecycleEnricher) lookup(
 ) tcpLifecycleEnrichment {
 	pid := int(payload.PID)
 	enrichment := tcpLifecycleEnrichment{}
+	trackedProcess := false
 
 	if enricher.processes != nil {
-		if snapshot, ok := enricher.processes.Lookup(
+		snapshot, found, tracked := enricher.processes.Lookup(
 			payload.PID,
 			payload.UID,
 			payload.Comm,
 			payload.KernelTimestampNS,
-		); ok {
+		)
+		trackedProcess = tracked
+		if found {
 			enrichment.ProcessPath = snapshot.Executable
 			enrichment.User = snapshot.User
 			if enricher.includeExtendedFields {
@@ -145,7 +148,7 @@ func (enricher *tcpLifecycleEnricher) lookup(
 		}
 	}
 
-	if enrichment.ProcessPath == "" {
+	if enrichment.ProcessPath == "" && !trackedProcess {
 		enrichment.ProcessPath = enricher.lookups.processPath(pid)
 	}
 	if enrichment.User == "" {
@@ -156,7 +159,7 @@ func (enricher *tcpLifecycleEnricher) lookup(
 		return enrichment
 	}
 
-	if enrichment.ProcessArgs == "" {
+	if enrichment.ProcessArgs == "" && !trackedProcess {
 		enrichment.ProcessArgs = enricher.lookups.processArgs(pid)
 	}
 	enrichment.ASN = enricher.lookups.asn(payload)
