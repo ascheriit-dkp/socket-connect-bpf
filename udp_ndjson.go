@@ -30,26 +30,15 @@ type udpNDJSONOutput struct {
 }
 
 type udpNDJSONEvent struct {
-	SchemaVersion     int               `json:"schema_version"`
-	EventType         string            `json:"event_type"`
-	ObservedAt        string            `json:"observed_at"`
-	KernelTimestampNS uint64            `json:"kernel_timestamp_ns"`
-	Protocol          string            `json:"protocol"`
-	AddressFamily     string            `json:"address_family"`
-	Process           udpNDJSONProcess  `json:"process"`
-	Remote            udpNDJSONEndpoint `json:"remote"`
-}
-
-type udpNDJSONProcess struct {
-	PID      uint32  `json:"pid"`
-	UID      uint32  `json:"uid"`
-	Comm     string  `json:"comm,omitempty"`
-	CgroupID *uint64 `json:"cgroup_id,omitempty"`
-}
-
-type udpNDJSONEndpoint struct {
-	IP   string  `json:"ip"`
-	Port *uint16 `json:"port"`
+	SchemaVersion     int                         `json:"schema_version"`
+	EventType         string                      `json:"event_type"`
+	ObservedAt        string                      `json:"observed_at"`
+	KernelTimestampNS uint64                      `json:"kernel_timestamp_ns"`
+	Protocol          string                      `json:"protocol"`
+	AddressFamily     string                      `json:"address_family"`
+	Process           tcpLifecycleNDJSONProcess   `json:"process"`
+	Remote            tcpLifecycleNDJSONEndpoint  `json:"remote"`
+	ASN               *tcpLifecycleNDJSONASN      `json:"asn,omitempty"`
 }
 
 func newUDPNDJSONOutputWithWriter(writer io.Writer) *udpNDJSONOutput {
@@ -74,21 +63,29 @@ func (output *udpNDJSONOutput) WriteEvent(event udpEventPayload) error {
 }
 
 func newUDPNDJSONEvent(event udpEventPayload) udpNDJSONEvent {
-	process := udpNDJSONProcess{
-		PID:  event.PID,
-		UID:  event.UID,
-		Comm: event.Comm,
-	}
-	if event.CgroupID != 0 {
-		process.CgroupID = uint64Pointer(event.CgroupID)
+	process := tcpLifecycleNDJSONProcess{
+		PID:            event.PID,
+		UID:            event.UID,
+		GID:            cloneUint32Pointer(event.GID),
+		Comm:           event.Comm,
+		Executable:     event.ProcessPath,
+		Arguments:      event.ProcessArgs,
+		User:           event.User,
+		StartTimeTicks: cloneUint64Pointer(event.ProcessStartTimeTicks),
+		Parent:         newTCPLifecycleNDJSONParent(event.Parent),
+		Cgroup:         newTCPLifecycleNDJSONCgroup(event.Cgroup),
+		Namespaces:     newTCPLifecycleNDJSONNamespaces(event.Namespaces),
+		Container:      newTCPLifecycleNDJSONContainer(event.Container),
 	}
 
-	remote := udpNDJSONEndpoint{Port: cloneUint16Pointer(event.Remote.Port)}
+	remote := tcpLifecycleNDJSONEndpoint{
+		Port: cloneUint16Pointer(event.Remote.Port),
+	}
 	if event.Remote.IP != nil {
 		remote.IP = event.Remote.IP.String()
 	}
 
-	return udpNDJSONEvent{
+	jsonEvent := udpNDJSONEvent{
 		SchemaVersion:     udpOutputSchemaVersion,
 		EventType:         event.EventType,
 		ObservedAt:        event.ObservedAt.UTC().Format(time.RFC3339Nano),
@@ -98,4 +95,12 @@ func newUDPNDJSONEvent(event udpEventPayload) udpNDJSONEvent {
 		Process:           process,
 		Remote:            remote,
 	}
+	if event.ASN != nil {
+		jsonEvent.ASN = &tcpLifecycleNDJSONASN{
+			Number: event.ASN.Number,
+			Name:   event.ASN.Name,
+		}
+	}
+
+	return jsonEvent
 }
