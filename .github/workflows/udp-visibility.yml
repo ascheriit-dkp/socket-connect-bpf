@@ -1,0 +1,61 @@
+name: UDP visibility
+
+on:
+  push:
+    branches:
+      - v2
+    paths:
+      - '.github/workflows/udp-visibility.yml'
+      - 'udpVisibilitySrc.c'
+      - 'udp_*.go'
+      - 'tcp_lifecycle_cli.go'
+      - 'tcp_lifecycle_runtime_linux.go'
+      - 'tcp_lifecycle_enrichment_linux.go'
+      - 'tcp_lifecycle_ndjson.go'
+      - 'process_*.go'
+      - 'scripts/test-udp-visibility.sh'
+  pull_request:
+    branches:
+      - v2
+    paths:
+      - '.github/workflows/udp-visibility.yml'
+      - 'udpVisibilitySrc.c'
+      - 'udp_*.go'
+      - 'tcp_lifecycle_cli.go'
+      - 'tcp_lifecycle_runtime_linux.go'
+      - 'tcp_lifecycle_enrichment_linux.go'
+      - 'tcp_lifecycle_ndjson.go'
+      - 'process_*.go'
+      - 'scripts/test-udp-visibility.sh'
+
+permissions:
+  contents: read
+
+jobs:
+  udp:
+    name: UDP smoke test
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Update AS data
+        run: ./updateASData.sh
+
+      - name: Generate, build and test
+        run: make all
+
+      - name: Run UDP visibility test
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/test-udp-visibility.sh \
+            ./bin/amd64/socket-connect-bpf
