@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -121,6 +122,17 @@ func ParseASNumbersIPv4(asTsvFile string) error {
 		}
 	}
 
+	for bucket := range parsedMap {
+		sort.Slice(parsedMap[bucket], func(left int, right int) bool {
+			leftEntry := parsedMap[bucket][left]
+			rightEntry := parsedMap[bucket][right]
+			if leftEntry.StartIP == rightEntry.StartIP {
+				return leftEntry.EndIP < rightEntry.EndIP
+			}
+			return leftEntry.StartIP < rightEntry.StartIP
+		})
+	}
+
 	asMap = parsedMap
 
 	return nil
@@ -175,13 +187,21 @@ func GetASInfoIPv4(ip net.IP) ASInfo {
 	bs := make([]byte, net.IPv4len)
 	binary.BigEndian.PutUint32(bs, ipAddr)
 
-	bucket := bs[0]
-	values := asMap[bucket]
+	values := asMap[bs[0]]
+	if len(values) == 0 {
+		return ASInfo{}
+	}
 
-	for _, asInfo := range values {
-		if checkRange(&asInfo, ipAddr) {
-			return asInfo
-		}
+	candidate := sort.Search(len(values), func(index int) bool {
+		return values[index].StartIP > ipAddr
+	}) - 1
+	if candidate < 0 {
+		return ASInfo{}
+	}
+
+	asInfo := values[candidate]
+	if checkRange(&asInfo, ipAddr) {
+		return asInfo
 	}
 
 	return ASInfo{}

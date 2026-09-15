@@ -2,18 +2,15 @@
 
 ## Purpose
 
-These benchmarks establish the initial userspace performance baseline for
+These benchmarks establish reproducible userspace performance baselines for
 socket-connect-bpf v2.
 
-They are intended to make future output-pipeline changes measurable and
-reproducible.
-
-They are not performance guarantees, release gates, or substitutes for
-end-to-end tracing benchmarks.
+They make output and enrichment changes measurable. They are not performance
+guarantees, release gates, or substitutes for end-to-end tracing benchmarks.
 
 ## Current scope
 
-The current benchmark suite measures:
+The benchmark suite measures:
 
 - Terminal sanitization of clean process data.
 - Terminal sanitization of control characters and escape sequences.
@@ -25,23 +22,46 @@ The current benchmark suite measures:
 - Extended output with arguments and ASN fields.
 - Serial output calls.
 - Concurrent output calls contending on the output mutex.
+- Indexed IPv4 ASN lookup latency and allocations.
+- Indexed IPv6 ASN lookup latency and allocations.
 
 The output benchmarks write to `io.Discard`.
 
-They therefore measure event formatting, serialization, allocation, and
-locking costs without including terminal, pipe, filesystem, or network I/O.
+They therefore measure event formatting, serialization, allocation, locking,
+and in-memory ASN lookup costs without including terminal, pipe, filesystem,
+or network I/O.
+
+## ASN lookup benchmarks
+
+Phase 6 sorts ASN ranges once while loading the enrichment datasets and uses
+binary search for lookups instead of scanning every candidate range.
+
+The focused benchmarks use:
+
+- 32,768 synthetic IPv4 ranges in one first-octet bucket;
+- 65,536 synthetic IPv6 ranges;
+- a successful lookup near the end of each data set.
+
+An observational GitHub Actions run on an AMD EPYC 9V74 shared runner with Go
+1.23.12 reported approximately:
+
+| Benchmark | ns/op | B/op | allocs/op |
+| --- | ---: | ---: | ---: |
+| Indexed IPv4 ASN lookup | 54 | 0 | 0 |
+| Indexed IPv6 ASN lookup | 94 | 0 | 0 |
+
+These values describe that runner and benchmark shape only. They are not a
+throughput guarantee for the tracer or for arbitrary ASN datasets.
 
 ## Excluded costs
 
 The current microbenchmarks do not measure:
 
 - eBPF program execution.
-- Perf-event delivery.
-- Kernel-to-userspace transfer.
+- Ring-buffer delivery or kernel-to-userspace transfer.
 - Event loss under load.
 - `/proc` process enrichment.
-- ASN dataset loading.
-- ASN lookup performance.
+- ASN dataset parsing or load-time sorting.
 - Terminal rendering.
 - Disk or pipe throughput.
 - Real connection-generation throughput.
@@ -68,7 +88,7 @@ Override any parameter when needed:
       BENCHMARK_TIME=1s \
       BENCHMARK_CPU=1
 
-To record the benchmark output together with environment metadata:
+To record benchmark output together with environment metadata:
 
     bash scripts/run-benchmarks.sh
 
@@ -152,9 +172,10 @@ results and must state what was and was not measured.
 
 ## Future benchmark work
 
-Later phases should add reproducible measurements for:
+Later work should add reproducible measurements for:
 
-- ASN lookup latency and memory use.
+- ASN dataset parsing and load-time sorting.
+- DNS correlation and other enrichment paths.
 - Event decoding and enrichment.
 - Ring-buffer throughput.
 - Event loss under controlled load.
