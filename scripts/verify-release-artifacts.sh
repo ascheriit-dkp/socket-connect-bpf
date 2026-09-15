@@ -134,6 +134,7 @@ expected_members = {
     "docs/BENCHMARKS.md": ("file", 0o644),
     "docs/EVENT_SCHEMA_V1.md": ("file", 0o644),
     "docs/EVENT_SCHEMA_V2.md": ("file", 0o644),
+    "docs/EVENT_SCHEMA_V3.md": ("file", 0o644),
     "docs/KERNEL_FILTERS.md": ("file", 0o644),
     "docs/TCP_LIFECYCLE.md": ("file", 0o644),
     "docs/V2_DESIGN.md": ("file", 0o644),

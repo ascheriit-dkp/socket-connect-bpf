@@ -3,15 +3,17 @@
 socket-connect-bpf is a lightweight Linux command-line tracer for
 process-aware outbound socket activity using eBPF.
 
-It supports two collection modes:
+It supports three collection modes:
 
 - the compatibility mode, which reports outbound connection attempts exactly as
   the existing v2 interface does;
 - TCP lifecycle mode, enabled explicitly with `--tcp-lifecycle`, which follows
   outbound IPv4 and IPv6 TCP connections from attempt through establishment,
-  failure, and closure.
+  failure, and closure;
+- UDP visibility mode, enabled explicitly with `--udp`, which reports outbound
+  IPv4 and IPv6 UDP sends that carry an explicit per-datagram destination.
 
-Both modes can produce a human-readable table or newline-delimited JSON
+All modes can produce a human-readable table or newline-delimited JSON
 (NDJSON).
 
 ![socket-connect-bpf while making a request with curl](samples/socket-connect-bpf.gif)
@@ -46,9 +48,38 @@ Lifecycle NDJSON uses schema version `2`. The complete contract is documented
 in [TCP lifecycle contract](docs/TCP_LIFECYCLE.md) and
 [NDJSON Event Schema v2](docs/EVENT_SCHEMA_V2.md).
 
+## UDP visibility mode
+
+Enable per-datagram UDP destination observation with:
+
+    sudo ./socket-connect-bpf --udp
+
+UDP mode emits `udp_send` for outbound IPv4 and IPv6 UDP sends with an explicit
+destination supplied through the `sendto` or `sendmsg` path.
+
+An `udp_send` event means only that the kernel observed the send and its
+explicit destination. It does not prove delivery, reachability, receipt, or
+application-layer success, and it does not invent a TCP-style UDP lifecycle.
+
+Use UDP NDJSON with:
+
+    sudo ./socket-connect-bpf \
+      --udp \
+      --output ndjson
+
+UDP NDJSON uses schema version `3`. See
+[NDJSON Event Schema v3](docs/EVENT_SCHEMA_V3.md) for the complete contract.
+
+Connected UDP destination observation through `connect()` remains available in
+the compatibility collection path. `--udp` adds visibility for unconnected
+per-datagram destinations.
+
+`--udp` and `--tcp-lifecycle` are intentionally mutually exclusive so a single
+NDJSON stream never mixes schema version 2 and schema version 3 records.
+
 ### Compatibility
 
-Without `--tcp-lifecycle`, existing behavior is unchanged:
+Without `--tcp-lifecycle` or `--udp`, existing behavior is unchanged:
 
 - collection remains attempt-only;
 - the existing table format remains unchanged;
@@ -99,6 +130,15 @@ The lifecycle table includes the event type, process, user, local and remote
 endpoints, result, error, connect latency, connection duration, and optional
 ASN information.
 
+### UDP table
+
+    sudo ./socket-connect-bpf \
+      --udp \
+      --output table
+
+The UDP table reports observation time, event type, process, address family,
+and explicit remote UDP endpoint.
+
 ### Attempt-only NDJSON
 
     sudo ./socket-connect-bpf --output ndjson
@@ -114,6 +154,14 @@ This emits schema version `1` and `connect_attempt` events only.
 This emits schema version `2` and never mixes version 1 and version 2 records in
 the same stream.
 
+### UDP NDJSON
+
+    sudo ./socket-connect-bpf \
+      --udp \
+      --output ndjson
+
+This emits schema version `3` and `udp_send` records only.
+
 Diagnostics and errors are written to standard error rather than mixed into the
 NDJSON stream.
 
@@ -124,25 +172,31 @@ metadata:
 
     sudo ./socket-connect-bpf -a
 
-It can be combined with lifecycle mode:
+It can be combined with TCP lifecycle mode or UDP mode:
 
     sudo ./socket-connect-bpf \
       --tcp-lifecycle \
       -a \
       --output ndjson
 
-Lifecycle mode caches initiating-process enrichment by `connection_id` in a
-bounded userspace cache so later establishment or closure events can preserve
-metadata for short-lived processes.
+    sudo ./socket-connect-bpf \
+      --udp \
+      -a \
+      --output ndjson
+
+Lifecycle mode caches initiating-process enrichment by `connection_id` after an
+attempt. TCP lifecycle and UDP modes also use a bounded process-generation
+cache populated by process execution and exit observations.
 
 ### Process attribution
 
-Lifecycle mode also observes process execution and exit and keeps a bounded
-cache of process generations. This prevents a later process that reuses the same
-PID from being silently substituted for the process that initiated a tracked
-connection.
+Advanced TCP and UDP modes observe process execution and exit and keep a
+bounded cache of process generations. This prevents a later process that reuses
+the same PID from being silently substituted for the process that initiated a
+tracked network operation.
 
-Lifecycle NDJSON exposes additional process context when available:
+Structured TCP and UDP output exposes additional process context when
+available:
 
 - real GID;
 - process start identity;
@@ -155,8 +209,9 @@ Lifecycle NDJSON exposes additional process context when available:
 Container metadata is deliberately best effort. The tracer does not contact a
 container runtime, Docker daemon, or Kubernetes API. Advanced metadata that
 exists only in `/proc` can be absent for a process that exits before userspace
-can snapshot it. See [NDJSON Event Schema v2](docs/EVENT_SCHEMA_V2.md) for the
-exact optional fields and semantics.
+can snapshot it. See [NDJSON Event Schema v2](docs/EVENT_SCHEMA_V2.md) and
+[NDJSON Event Schema v3](docs/EVENT_SCHEMA_V3.md) for the exact optional fields
+and semantics.
 
 ## Kernel-side filtering
 
@@ -190,35 +245,40 @@ Supported family values are:
 | `ipv6` | `AF_INET6` |
 | `other` | Supported non-IP families in attempt-only mode |
 
-Lifecycle mode currently tracks outbound IPv4 and IPv6 TCP connections.
+TCP lifecycle mode tracks outbound IPv4 and IPv6 TCP connections. UDP mode
+reports explicit IPv4 and IPv6 UDP destinations; `--family other` does not
+match a schema version 3 UDP event.
 
-The filter decision is made at the initiating attempt. Only accepted attempts
-create lifecycle correlation state, and later lifecycle events inherit that
-decision.
+For TCP lifecycle, the filter decision is made at the initiating attempt and
+later lifecycle events inherit that decision. UDP filters are evaluated before
+an accepted UDP send is submitted to its ring buffer.
 
 The complete filter contract is documented in
 [Kernel-side filter contract](docs/KERNEL_FILTERS.md).
 
 ## Event loss and lifecycle diagnostics
 
-The shared ring buffer counts matching events that could not be submitted
-because space was unavailable.
+The ring buffers count matching events that could not be submitted because
+space was unavailable.
 
-At shutdown the tracer reports:
+Compatibility/TCP shutdown reports the existing socket-event counter:
 
     ring-buffer event loss summary: total=0
 
-Lifecycle mode also reports bounded-correlation diagnostics:
+UDP mode reports:
+
+    UDP event loss summary: total=0
+
+TCP lifecycle mode also reports bounded-correlation diagnostics:
 
     TCP lifecycle diagnostic summary: map_update_failures=0 missing_correlation=0 unsupported_observations=0
 
-Process exec/exit observation has its own loss counter:
+Process exec/exit observation in advanced modes has its own loss counter:
 
     process event loss summary: total=0
 
-Non-zero diagnostic values indicate that one or more lifecycle observations
-could not be correlated or represented reliably. They are diagnostics, not
-fabricated public lifecycle events.
+Non-zero diagnostic values indicate that one or more observations could not be
+represented reliably. They are diagnostics, not fabricated network events.
 
 ## Autonomous-system data
 
@@ -252,7 +312,13 @@ Developers can refresh the datasets with:
 
     --tcp-lifecycle
         Track outbound IPv4 and IPv6 TCP attempts, establishment, failures,
-        and closure. Lifecycle NDJSON uses schema version 2.
+        and closure. Lifecycle NDJSON uses schema version 2. Cannot be combined
+        with --udp.
+
+    --udp
+        Observe outbound IPv4 and IPv6 UDP sends with explicit per-datagram
+        destinations. UDP NDJSON uses schema version 3. Cannot be combined with
+        --tcp-lifecycle.
 
     -a
         Include process arguments and autonomous-system information.
@@ -289,8 +355,8 @@ Developers can refresh the datasets with:
 - x86-64/amd64 or AArch64/arm64
 - privileges required to load and attach eBPF programs
 
-The lifecycle integration suite runs on Ubuntu 24.04 in GitHub Actions and
-exercises real IPv4 and IPv6 TCP connections.
+The TCP lifecycle and UDP integration suites run on Ubuntu 24.04 in GitHub
+Actions and exercise real IPv4 and IPv6 network operations.
 
 ## Installation
 
@@ -358,10 +424,18 @@ Run the TCP lifecycle suites with:
     bash scripts/test-process-context.sh \
       ./bin/amd64/socket-connect-bpf
 
-The live suites require Linux, suitable eBPF privileges through `sudo`, and the
-ability to attach the required probes and tracepoint.
+Run the UDP live suites with:
 
-### Lifecycle coverage
+    bash scripts/test-udp-visibility.sh \
+      ./bin/amd64/socket-connect-bpf
+
+    bash scripts/test-udp-filters.sh \
+      ./bin/amd64/socket-connect-bpf
+
+The live suites require Linux, suitable eBPF privileges through `sudo`, and the
+ability to attach the required probes and tracepoints.
+
+### TCP lifecycle coverage
 
 The lifecycle CI validates real kernel behavior including:
 
@@ -380,9 +454,21 @@ The lifecycle CI validates real kernel behavior including:
 - lifecycle table output;
 - clean shutdown, ring-buffer loss reporting, and lifecycle diagnostics.
 
-The normal Go workflow additionally retains the existing generation, formatting,
-unit-test, integration, benchmark, static-analysis, and reproducible release
-checks.
+### UDP coverage
+
+The UDP CI validates real kernel behavior including:
+
+- explicit IPv4 destinations supplied through `sendto`;
+- explicit IPv4 destinations supplied through `sendmsg`;
+- IPv6 explicit destinations when IPv6 is available on the runner;
+- PID, UID, family, and destination-port filtering;
+- NDJSON schema version 3;
+- absence of TCP-style success and connection semantics;
+- process attribution;
+- clean shutdown and UDP event-loss reporting.
+
+The normal Go workflow additionally retains generation, formatting, unit-test,
+integration, benchmark, and reproducible release checks.
 
 ## Release artifacts
 
@@ -403,18 +489,25 @@ Verify existing release files with:
 TCP lifecycle mode is intentionally limited to outbound IPv4 and IPv6 TCP
 connections initiated after the tracer attaches.
 
-It does not claim application-layer success and does not currently trace:
+UDP mode intentionally reports explicit per-datagram destinations rather than a
+fictional UDP connection lifecycle. Connected UDP sends without an explicit
+`msg_name` are not emitted as `udp_send`; their destination may already have
+been observed through the compatibility `connect()` path.
+
+The tracer does not claim application-layer success and does not currently
+trace:
 
 - inbound accepted TCP connections;
 - listening sockets;
-- UDP lifecycles;
+- UDP delivery or receive-side outcomes;
 - individual packets;
 - TCP retransmissions;
 - congestion-control state;
 - per-packet latency.
 
-See [TCP lifecycle contract](docs/TCP_LIFECYCLE.md) for the detailed semantic
-contract and failure/correlation rules.
+See [TCP lifecycle contract](docs/TCP_LIFECYCLE.md),
+[NDJSON Event Schema v2](docs/EVENT_SCHEMA_V2.md), and
+[NDJSON Event Schema v3](docs/EVENT_SCHEMA_V3.md) for detailed semantics.
 
 ## License
 
