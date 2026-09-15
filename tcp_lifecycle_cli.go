@@ -25,8 +25,12 @@ var tcpLifecycleFlag = flag.Bool(
 	"track outbound TCP attempts, establishment, failures and closure",
 )
 
+// setupWorkers historically uses this predicate to select the advanced runtime.
+// UDP visibility is routed through the same entry point without changing the
+// compatibility-mode default.
 func tcpLifecycleEnabled() bool {
-	return tcpLifecycleFlag != nil && *tcpLifecycleFlag
+	tcpEnabled := tcpLifecycleFlag != nil && *tcpLifecycleFlag
+	return tcpEnabled || udpVisibilityEnabled()
 }
 
 func selectedOutputFormat() string {
