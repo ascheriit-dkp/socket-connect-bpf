@@ -39,6 +39,14 @@ const (
 )
 
 func setupTCPLifecycleWorkers(filters kernelFilterOptions) {
+	if udpVisibilityEnabled() {
+		if tcpLifecycleFlag != nil && *tcpLifecycleFlag {
+			log.Fatal("--udp and --tcp-lifecycle cannot be used together")
+		}
+		setupUDPWorkers(filters)
+		return
+	}
+
 	stopper := make(chan os.Signal, 1)
 	signal.Notify(stopper, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(stopper)
