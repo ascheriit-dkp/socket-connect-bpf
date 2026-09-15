@@ -51,13 +51,19 @@ type tcpLifecycleEventPayload struct {
 	AttemptTimestampNS     uint64
 	EstablishedTimestampNS *uint64
 
-	PID         uint32
-	UID         uint32
-	Comm        string
-	ProcessPath string
-	ProcessArgs string
-	User        string
-	ASN         *tcpLifecycleASNPayload
+	PID                   uint32
+	UID                   uint32
+	Comm                  string
+	ProcessPath           string
+	ProcessArgs           string
+	User                  string
+	GID                   *uint32
+	ProcessStartTimeTicks *uint64
+	Parent                *tcpLifecycleProcessParentPayload
+	Cgroup                *tcpLifecycleCgroupPayload
+	Namespaces            *tcpLifecycleNamespacesPayload
+	Container             *tcpLifecycleContainerPayload
+	ASN                   *tcpLifecycleASNPayload
 
 	Local  tcpLifecycleEndpointPayload
 	Remote tcpLifecycleEndpointPayload
@@ -68,6 +74,31 @@ type tcpLifecycleEventPayload struct {
 
 	ConnectLatencyNS     *uint64
 	ConnectionDurationNS *uint64
+}
+
+type tcpLifecycleProcessParentPayload struct {
+	PID            uint32
+	StartTimeTicks *uint64
+}
+
+type tcpLifecycleCgroupPayload struct {
+	ID   *uint64
+	Path string
+}
+
+type tcpLifecycleNamespacesPayload struct {
+	Cgroup uint64
+	IPC    uint64
+	Mount  uint64
+	Net    uint64
+	PID    uint64
+	User   uint64
+	UTS    uint64
+}
+
+type tcpLifecycleContainerPayload struct {
+	Runtime string
+	ID      string
 }
 
 // tcpLifecycleEndpointPayload preserves whether an endpoint component was
@@ -214,6 +245,10 @@ func lifecycleDurationPointer(
 }
 
 func uint16Pointer(value uint16) *uint16 {
+	return &value
+}
+
+func uint32Pointer(value uint32) *uint32 {
 	return &value
 }
 
