@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -112,6 +113,20 @@ func ParseASNumbersIPv6(asTsvFile string) error {
 		})
 	}
 
+	sort.Slice(parsedList, func(left int, right int) bool {
+		comparison := bytes.Compare(
+			parsedList[left].StartIP,
+			parsedList[right].StartIP,
+		)
+		if comparison == 0 {
+			return bytes.Compare(
+				parsedList[left].EndIP,
+				parsedList[right].EndIP,
+			) < 0
+		}
+		return comparison < 0
+	})
+
 	asList = parsedList
 
 	return nil
@@ -165,10 +180,10 @@ func parseIPv6ASNumber(
 		return 0, fmt.Errorf(
 			"parse IPv6 ASN data %q at record %d: invalid AS number %q: %w",
 			asTsvFile,
-			recordNumber,
-			value,
-			err,
-		)
+				recordNumber,
+				value,
+				err,
+			)
 	}
 
 	return uint32(parsedValue), nil
@@ -182,15 +197,20 @@ func GetASInfoIPv6(ip net.IP) ASInfoIPv6 {
 	}
 
 	normalizedIP := ip.To16()
-	if normalizedIP == nil {
+	if normalizedIP == nil || len(asList) == 0 {
 		return ASInfoIPv6{}
 	}
 
-	for _, asInfo := range asList {
-		if bytes.Compare(normalizedIP, asInfo.StartIP) >= 0 &&
-			bytes.Compare(normalizedIP, asInfo.EndIP) <= 0 {
-			return asInfo
-		}
+	candidate := sort.Search(len(asList), func(index int) bool {
+		return bytes.Compare(asList[index].StartIP, normalizedIP) > 0
+	}) - 1
+	if candidate < 0 {
+		return ASInfoIPv6{}
+	}
+
+	asInfo := asList[candidate]
+	if bytes.Compare(normalizedIP, asInfo.EndIP) <= 0 {
+		return asInfo
 	}
 
 	return ASInfoIPv6{}
