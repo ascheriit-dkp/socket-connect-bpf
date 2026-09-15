@@ -28,16 +28,23 @@ import (
 const maxTCPLifecycleEnrichmentEntries = 65536
 
 type tcpLifecycleEnrichment struct {
-	ProcessPath string
-	ProcessArgs string
-	User        string
-	ASN         *tcpLifecycleASNPayload
+	ProcessPath           string
+	ProcessArgs           string
+	User                  string
+	GID                   *uint32
+	ProcessStartTimeTicks *uint64
+	Parent                *tcpLifecycleProcessParentPayload
+	Cgroup                *tcpLifecycleCgroupPayload
+	Namespaces            *tcpLifecycleNamespacesPayload
+	Container             *tcpLifecycleContainerPayload
+	ASN                   *tcpLifecycleASNPayload
 }
 
 type tcpLifecycleEnrichmentLookups struct {
 	processPath func(int) string
 	processArgs func(int) string
 	username    func(uint32) string
+	context     func(int) processContextSnapshot
 	asn         func(tcpLifecycleEventPayload) *tcpLifecycleASNPayload
 }
 
@@ -94,6 +101,7 @@ func defaultTCPLifecycleEnrichmentLookups() tcpLifecycleEnrichmentLookups {
 		processPath: linux.ProcessPathForPid,
 		processArgs: linux.ProcessArgsForPid,
 		username:    lookupTCPLifecycleUsername,
+		context:     lookupProcessContext,
 		asn:         lookupTCPLifecycleASN,
 	}
 }
@@ -109,6 +117,14 @@ func (enricher *tcpLifecycleEnricher) Enrich(
 	payload.ProcessPath = enrichment.ProcessPath
 	payload.ProcessArgs = enrichment.ProcessArgs
 	payload.User = enrichment.User
+	payload.GID = cloneUint32Pointer(enrichment.GID)
+	payload.ProcessStartTimeTicks = cloneUint64Pointer(
+		enrichment.ProcessStartTimeTicks,
+	)
+	payload.Parent = cloneTCPLifecycleParent(enrichment.Parent)
+	payload.Cgroup = cloneTCPLifecycleCgroup(enrichment.Cgroup)
+	payload.Namespaces = cloneTCPLifecycleNamespaces(enrichment.Namespaces)
+	payload.Container = cloneTCPLifecycleContainer(enrichment.Container)
 	payload.ASN = cloneTCPLifecycleASN(enrichment.ASN)
 
 	switch payload.EventType {
@@ -142,15 +158,32 @@ func (enricher *tcpLifecycleEnricher) lookup(
 		if found {
 			enrichment.ProcessPath = snapshot.Executable
 			enrichment.User = snapshot.User
+			enrichment.GID = uint32Pointer(snapshot.GID)
+			applyProcessContext(
+				&enrichment,
+				snapshot.Context,
+				uint64PointerIfNonZero(snapshot.CgroupID),
+			)
 			if enricher.includeExtendedFields {
 				enrichment.ProcessArgs = snapshot.Arguments
 			}
 		}
 	}
 
-	if enrichment.ProcessPath == "" && !trackedProcess {
-		enrichment.ProcessPath = enricher.lookups.processPath(pid)
+	if !trackedProcess {
+		if enrichment.ProcessPath == "" {
+			enrichment.ProcessPath = enricher.lookups.processPath(pid)
+		}
+
+		if enricher.lookups.context != nil {
+			context := enricher.lookups.context(pid)
+			if enrichment.GID == nil {
+				enrichment.GID = cloneUint32Pointer(context.GID)
+			}
+			applyProcessContext(&enrichment, context, nil)
+		}
 	}
+
 	if enrichment.User == "" {
 		enrichment.User = enricher.lookups.username(payload.UID)
 	}
@@ -165,6 +198,59 @@ func (enricher *tcpLifecycleEnricher) lookup(
 	enrichment.ASN = enricher.lookups.asn(payload)
 
 	return enrichment
+}
+
+func applyProcessContext(
+	enrichment *tcpLifecycleEnrichment,
+	context processContextSnapshot,
+	cgroupID *uint64,
+) {
+	if context.StartTimeTicks != 0 {
+		enrichment.ProcessStartTimeTicks = uint64Pointer(context.StartTimeTicks)
+	}
+
+	if context.ParentPID != 0 {
+		parent := &tcpLifecycleProcessParentPayload{
+			PID: context.ParentPID,
+		}
+		if context.ParentStartTimeTicks != 0 {
+			parent.StartTimeTicks = uint64Pointer(context.ParentStartTimeTicks)
+		}
+		enrichment.Parent = parent
+	}
+
+	if cgroupID != nil || context.CgroupPath != "" {
+		enrichment.Cgroup = &tcpLifecycleCgroupPayload{
+			ID:   cloneUint64Pointer(cgroupID),
+			Path: context.CgroupPath,
+		}
+	}
+
+	if !processNamespacesEmpty(context.Namespaces) {
+		enrichment.Namespaces = &tcpLifecycleNamespacesPayload{
+			Cgroup: context.Namespaces.Cgroup,
+			IPC:    context.Namespaces.IPC,
+			Mount:  context.Namespaces.Mount,
+			Net:    context.Namespaces.Net,
+			PID:    context.Namespaces.PID,
+			User:   context.Namespaces.User,
+			UTS:    context.Namespaces.UTS,
+		}
+	}
+
+	if context.Container != nil {
+		enrichment.Container = &tcpLifecycleContainerPayload{
+			Runtime: context.Container.Runtime,
+			ID:      context.Container.ID,
+		}
+	}
+}
+
+func uint64PointerIfNonZero(value uint64) *uint64 {
+	if value == 0 {
+		return nil
+	}
+	return uint64Pointer(value)
 }
 
 func lookupTCPLifecycleUsername(uid uint32) string {
@@ -211,9 +297,66 @@ func lookupTCPLifecycleASN(
 	return nil
 }
 
+func cloneTCPLifecycleParent(
+	value *tcpLifecycleProcessParentPayload,
+) *tcpLifecycleProcessParentPayload {
+	if value == nil {
+		return nil
+	}
+
+	return &tcpLifecycleProcessParentPayload{
+		PID:            value.PID,
+		StartTimeTicks: cloneUint64Pointer(value.StartTimeTicks),
+	}
+}
+
+func cloneTCPLifecycleCgroup(
+	value *tcpLifecycleCgroupPayload,
+) *tcpLifecycleCgroupPayload {
+	if value == nil {
+		return nil
+	}
+
+	return &tcpLifecycleCgroupPayload{
+		ID:   cloneUint64Pointer(value.ID),
+		Path: value.Path,
+	}
+}
+
+func cloneTCPLifecycleNamespaces(
+	value *tcpLifecycleNamespacesPayload,
+) *tcpLifecycleNamespacesPayload {
+	if value == nil {
+		return nil
+	}
+
+	copied := *value
+	return &copied
+}
+
+func cloneTCPLifecycleContainer(
+	value *tcpLifecycleContainerPayload,
+) *tcpLifecycleContainerPayload {
+	if value == nil {
+		return nil
+	}
+
+	copied := *value
+	return &copied
+}
+
 func cloneTCPLifecycleASN(
 	value *tcpLifecycleASNPayload,
 ) *tcpLifecycleASNPayload {
+	if value == nil {
+		return nil
+	}
+
+	copied := *value
+	return &copied
+}
+
+func cloneUint32Pointer(value *uint32) *uint32 {
 	if value == nil {
 		return nil
 	}

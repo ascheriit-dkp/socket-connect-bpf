@@ -42,12 +42,14 @@ type processSnapshot struct {
 	Executable      string
 	Arguments       string
 	User            string
+	Context         processContextSnapshot
 }
 
 type processCacheLookups struct {
 	executable func(int) string
 	arguments  func(int) string
 	username   func(uint32) string
+	context    func(int) processContextSnapshot
 }
 
 type processCacheKey struct {
@@ -78,6 +80,7 @@ func newProcessCache(includeArguments bool) *processCache {
 			executable: lookupProcessExecutable,
 			arguments:  lookupProcessArguments,
 			username:   lookupProcessUsername,
+			context:    lookupProcessContext,
 		},
 	)
 }
@@ -124,6 +127,10 @@ func (cache *processCache) observeExec(event processEvent) {
 		Comm:            event.Comm,
 		Executable:      cache.lookups.executable(int(event.TGID)),
 		User:            cache.lookups.username(event.UID),
+	}
+
+	if cache.lookups.context != nil {
+		snapshot.Context = cache.lookups.context(int(event.TGID))
 	}
 
 	if cache.includeArguments {

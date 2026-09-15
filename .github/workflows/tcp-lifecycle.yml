@@ -15,6 +15,7 @@ on:
       - 'scripts/test-tcp-lifecycle-filters.sh'
       - 'scripts/test-tcp-lifecycle-table.sh'
       - 'scripts/test-tcp-lifecycle-async.sh'
+      - 'scripts/test-process-context.sh'
   pull_request:
     branches:
       - v2
@@ -29,6 +30,7 @@ on:
       - 'scripts/test-tcp-lifecycle-filters.sh'
       - 'scripts/test-tcp-lifecycle-table.sh'
       - 'scripts/test-tcp-lifecycle-async.sh'
+      - 'scripts/test-process-context.sh'
 
 permissions:
   contents: read
@@ -81,4 +83,11 @@ jobs:
         run: |
           set -euo pipefail
           bash scripts/test-tcp-lifecycle-async.sh \
+            ./bin/amd64/socket-connect-bpf
+
+      - name: Run process context lifecycle test
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/test-process-context.sh \
             ./bin/amd64/socket-connect-bpf

@@ -135,6 +135,29 @@ Lifecycle mode caches initiating-process enrichment by `connection_id` in a
 bounded userspace cache so later establishment or closure events can preserve
 metadata for short-lived processes.
 
+### Process attribution
+
+Lifecycle mode also observes process execution and exit and keeps a bounded
+cache of process generations. This prevents a later process that reuses the same
+PID from being silently substituted for the process that initiated a tracked
+connection.
+
+Lifecycle NDJSON exposes additional process context when available:
+
+- real GID;
+- process start identity;
+- parent PID and parent start identity;
+- kernel cgroup ID and cgroup path;
+- cgroup, IPC, mount, network, PID, user, and UTS namespace inode IDs;
+- best-effort Docker, containerd, CRI-O, or Podman identity derived from the
+  cgroup path.
+
+Container metadata is deliberately best effort. The tracer does not contact a
+container runtime, Docker daemon, or Kubernetes API. Advanced metadata that
+exists only in `/proc` can be absent for a process that exits before userspace
+can snapshot it. See [NDJSON Event Schema v2](docs/EVENT_SCHEMA_V2.md) for the
+exact optional fields and semantics.
+
 ## Kernel-side filtering
 
 The tracer supports kernel-side filters for:
@@ -188,6 +211,10 @@ At shutdown the tracer reports:
 Lifecycle mode also reports bounded-correlation diagnostics:
 
     TCP lifecycle diagnostic summary: map_update_failures=0 missing_correlation=0 unsupported_observations=0
+
+Process exec/exit observation has its own loss counter:
+
+    process event loss summary: total=0
 
 Non-zero diagnostic values indicate that one or more lifecycle observations
 could not be correlated or represented reliably. They are diagnostics, not
@@ -325,6 +352,12 @@ Run the TCP lifecycle suites with:
     bash scripts/test-tcp-lifecycle-table.sh \
       ./bin/amd64/socket-connect-bpf
 
+    bash scripts/test-tcp-lifecycle-async.sh \
+      ./bin/amd64/socket-connect-bpf
+
+    bash scripts/test-process-context.sh \
+      ./bin/amd64/socket-connect-bpf
+
 The live suites require Linux, suitable eBPF privileges through `sudo`, and the
 ability to attach the required probes and tracepoint.
 
@@ -340,6 +373,8 @@ The lifecycle CI validates real kernel behavior including:
 - connect latency and established duration;
 - duplicate terminal-event suppression;
 - initiating-process enrichment preservation;
+- exec/exit process attribution and PID-generation preservation;
+- parent, cgroup, namespace, and best-effort container context;
 - PID, UID, family, and port filtering;
 - NDJSON schema version 2;
 - lifecycle table output;

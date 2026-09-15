@@ -33,22 +33,79 @@ and must not be assumed stable across tracer restarts.
 
 The `process` object always contains:
 
-- `pid`: initiating process ID.
+- `pid`: initiating process ID. In lifecycle mode this is the thread-group ID
+  captured at the initiating TCP attempt.
 - `uid`: initiating user ID.
 
 It may also contain:
 
+- `gid`: real group ID observed for the process.
 - `comm`: task command name when available.
 - `executable`: resolved executable path when userspace enrichment succeeds.
 - `user`: resolved user name, or the numeric UID when name lookup fails.
+- `start_time_ticks`: process start identity from `/proc/<pid>/stat`, measured
+  in clock ticks since boot. Together with `pid` it distinguishes PID reuse
+  when available.
+- `parent`: parent-process identity object.
+- `cgroup`: cgroup identity object.
+- `namespaces`: Linux namespace inode identifiers.
+- `container`: best-effort container runtime identity derived from the cgroup
+  path when a supported pattern is recognized.
 
 When `-a` is enabled it may additionally contain:
 
 - `arguments`: command-line arguments captured from the initiating process.
 
-Process metadata is cached by `connection_id` after the attempt so later
-lifecycle events preserve attribution even when the initiating process exits
-before establishment or closure is observed. The cache is bounded.
+### Parent object
+
+`process.parent` may contain:
+
+- `pid`: parent process ID.
+- `start_time_ticks`: parent start identity from `/proc/<ppid>/stat` when the
+  parent still exists while enrichment is performed.
+
+### Cgroup object
+
+`process.cgroup` may contain:
+
+- `id`: kernel cgroup ID captured at process execution when available.
+- `path`: cgroup path read from `/proc/<pid>/cgroup` when available. Unified
+  cgroup v2 is preferred; cgroup v1 falls back to the first usable hierarchy.
+
+### Namespaces object
+
+`process.namespaces` may contain inode identifiers for:
+
+- `cgroup`
+- `ipc`
+- `mnt`
+- `net`
+- `pid`
+- `user`
+- `uts`
+
+Namespace identifiers come from `/proc/<pid>/ns/*`. Missing namespace entries
+are omitted rather than fabricated.
+
+### Container object
+
+`process.container` is best-effort metadata and is emitted only when the cgroup
+path matches a recognized runtime pattern. It contains:
+
+- `runtime`: currently `docker`, `containerd`, `cri-o`, or `podman`.
+- `id`: container ID extracted from the cgroup path.
+
+No container daemon or Kubernetes API is queried. Absence of `container` does
+not prove that the process is running directly on the host.
+
+Process execution and exit are observed in lifecycle mode. A bounded process
+cache retains multiple PID generations using monotonic execution timestamps.
+The connection-level enrichment cache then preserves the selected initiating
+process metadata for later establishment, failure, and closure events.
+
+Advanced `/proc` metadata is best effort. Very short-lived processes can still
+lose fields that exist only in `/proc` if they exit before userspace snapshots
+them; kernel-captured process identifiers remain available.
 
 ## ASN object
 
@@ -90,7 +147,7 @@ success or failure.
 Example:
 
 ```json
-{"schema_version":2,"event_type":"connect_attempt","connection_id":42,"observed_at":"2026-08-26T12:00:00Z","kernel_timestamp_ns":1000,"protocol":"tcp","address_family":"AF_INET","process":{"pid":1234,"uid":1000,"comm":"curl"},"local":{},"remote":{"ip":"198.51.100.20","port":443}}
+{"schema_version":2,"event_type":"connect_attempt","connection_id":42,"observed_at":"2026-08-26T12:00:00Z","kernel_timestamp_ns":1000,"protocol":"tcp","address_family":"AF_INET","process":{"pid":1234,"uid":1000,"gid":1000,"comm":"curl","start_time_ticks":123456,"parent":{"pid":1200,"start_time_ticks":120000},"cgroup":{"id":987,"path":"/user.slice/user-1000.slice/session-2.scope"},"namespaces":{"mnt":4026531841,"net":4026531993,"pid":4026531836}},"local":{},"remote":{"ip":"198.51.100.20","port":443}}
 ```
 
 ## `tcp_established`
