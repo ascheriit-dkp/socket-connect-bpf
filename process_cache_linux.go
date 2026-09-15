@@ -31,17 +31,17 @@ import (
 const maxProcessCacheEntries = 65536
 
 type processSnapshot struct {
-	TGID              uint32
-	TID               uint32
-	UID               uint32
-	GID               uint32
-	ExecTimestampNS   uint64
-	ExitTimestampNS   uint64
-	CgroupID          uint64
-	Comm              string
-	Executable        string
-	Arguments         string
-	User              string
+	TGID            uint32
+	TID             uint32
+	UID             uint32
+	GID             uint32
+	ExecTimestampNS uint64
+	ExitTimestampNS uint64
+	CgroupID        uint64
+	Comm            string
+	Executable      string
+	Arguments       string
+	User            string
 }
 
 type processCacheLookups struct {
@@ -50,7 +50,13 @@ type processCacheLookups struct {
 	username   func(uint32) string
 }
 
+type processCacheKey struct {
+	TGID            uint32
+	ExecTimestampNS uint64
+}
+
 type processCacheEntry struct {
+	key      processCacheKey
 	snapshot processSnapshot
 }
 
@@ -58,7 +64,8 @@ type processCache struct {
 	mu               sync.Mutex
 	maxEntries       int
 	includeArguments bool
-	entries          map[uint32]*list.Element
+	entries          map[processCacheKey]*list.Element
+	generations      map[uint32][]processCacheKey
 	lru              list.List
 	lookups          processCacheLookups
 }
@@ -87,7 +94,8 @@ func newProcessCacheWithLookups(
 	return &processCache{
 		maxEntries:       maxEntries,
 		includeArguments: includeArguments,
-		entries:          make(map[uint32]*list.Element),
+		entries:          make(map[processCacheKey]*list.Element),
+		generations:      make(map[uint32][]processCacheKey),
 		lookups:          lookups,
 	}
 }
@@ -122,27 +130,32 @@ func (cache *processCache) observeExec(event processEvent) {
 		snapshot.Arguments = cache.lookups.arguments(int(event.TGID))
 	}
 
+	key := processCacheKey{
+		TGID:            event.TGID,
+		ExecTimestampNS: event.KernelTimestampNS,
+	}
+
 	cache.mu.Lock()
 	defer cache.mu.Unlock()
 
-	if existing, ok := cache.entries[event.TGID]; ok {
+	if existing, ok := cache.entries[key]; ok {
 		existing.Value.(*processCacheEntry).snapshot = snapshot
 		cache.lru.MoveToBack(existing)
 		return
 	}
 
-	element := cache.lru.PushBack(&processCacheEntry{snapshot: snapshot})
-	cache.entries[event.TGID] = element
+	element := cache.lru.PushBack(&processCacheEntry{
+		key:      key,
+		snapshot: snapshot,
+	})
+	cache.entries[key] = element
+	cache.generations[event.TGID] = append(
+		cache.generations[event.TGID],
+		key,
+	)
 
 	for len(cache.entries) > cache.maxEntries {
-		oldest := cache.lru.Front()
-		if oldest == nil {
-			break
-		}
-
-		entry := oldest.Value.(*processCacheEntry)
-		delete(cache.entries, entry.snapshot.TGID)
-		cache.lru.Remove(oldest)
+		cache.evictOldestLocked()
 	}
 }
 
@@ -154,58 +167,104 @@ func (cache *processCache) observeExit(event processEvent) {
 	cache.mu.Lock()
 	defer cache.mu.Unlock()
 
-	element, ok := cache.entries[event.TGID]
-	if !ok {
+	keys := cache.generations[event.TGID]
+	for index := len(keys) - 1; index >= 0; index-- {
+		element, ok := cache.entries[keys[index]]
+		if !ok {
+			continue
+		}
+
+		entry := element.Value.(*processCacheEntry)
+		if event.KernelTimestampNS < entry.snapshot.ExecTimestampNS {
+			continue
+		}
+		if entry.snapshot.ExitTimestampNS != 0 {
+			continue
+		}
+
+		entry.snapshot.ExitTimestampNS = event.KernelTimestampNS
+		cache.lru.MoveToBack(element)
 		return
 	}
-
-	entry := element.Value.(*processCacheEntry)
-	if event.KernelTimestampNS < entry.snapshot.ExecTimestampNS {
-		return
-	}
-
-	entry.snapshot.ExitTimestampNS = event.KernelTimestampNS
-	cache.lru.MoveToBack(element)
 }
 
+// Lookup returns the process generation that was alive at kernelTimestampNS.
+// trackedPID is true when the cache has observed at least one exec generation
+// for the PID. Callers use it to avoid falling back to /proc when that fallback
+// could accidentally read metadata from a newer PID generation.
 func (cache *processCache) Lookup(
 	pid uint32,
 	uid uint32,
 	comm string,
 	kernelTimestampNS uint64,
-) (processSnapshot, bool) {
+) (snapshot processSnapshot, found bool, trackedPID bool) {
 	cache.mu.Lock()
 	defer cache.mu.Unlock()
 
-	element, ok := cache.entries[pid]
-	if !ok {
-		return processSnapshot{}, false
+	keys := cache.generations[pid]
+	if len(keys) == 0 {
+		return processSnapshot{}, false, false
 	}
 
-	snapshot := element.Value.(*processCacheEntry).snapshot
+	for index := len(keys) - 1; index >= 0; index-- {
+		element, ok := cache.entries[keys[index]]
+		if !ok {
+			continue
+		}
 
-	if snapshot.UID != uid {
-		return processSnapshot{}, false
-	}
-	if snapshot.Comm != "" && comm != "" && snapshot.Comm != comm {
-		return processSnapshot{}, false
-	}
-	if kernelTimestampNS != 0 && snapshot.ExecTimestampNS > kernelTimestampNS {
-		return processSnapshot{}, false
-	}
-	if snapshot.ExitTimestampNS != 0 &&
-		kernelTimestampNS > snapshot.ExitTimestampNS {
-		return processSnapshot{}, false
+		candidate := element.Value.(*processCacheEntry).snapshot
+		if candidate.ExecTimestampNS > kernelTimestampNS {
+			continue
+		}
+		if candidate.ExitTimestampNS != 0 &&
+			kernelTimestampNS > candidate.ExitTimestampNS {
+			continue
+		}
+		if candidate.UID != uid {
+			continue
+		}
+		if candidate.Comm != "" && comm != "" && candidate.Comm != comm {
+			continue
+		}
+
+		cache.lru.MoveToBack(element)
+		return candidate, true, true
 	}
 
-	cache.lru.MoveToBack(element)
-	return snapshot, true
+	return processSnapshot{}, false, true
 }
 
 func (cache *processCache) Len() int {
 	cache.mu.Lock()
 	defer cache.mu.Unlock()
 	return len(cache.entries)
+}
+
+func (cache *processCache) evictOldestLocked() {
+	oldest := cache.lru.Front()
+	if oldest == nil {
+		return
+	}
+
+	entry := oldest.Value.(*processCacheEntry)
+	delete(cache.entries, entry.key)
+	cache.lru.Remove(oldest)
+
+	keys := cache.generations[entry.key.TGID]
+	for index, key := range keys {
+		if key != entry.key {
+			continue
+		}
+
+		keys = append(keys[:index], keys[index+1:]...)
+		break
+	}
+
+	if len(keys) == 0 {
+		delete(cache.generations, entry.key.TGID)
+	} else {
+		cache.generations[entry.key.TGID] = keys
+	}
 }
 
 func lookupProcessExecutable(pid int) string {
