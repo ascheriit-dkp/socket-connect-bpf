@@ -65,6 +65,7 @@ required_documentation=(
 	"docs/BENCHMARKS.md"
 	"docs/EVENT_SCHEMA_V1.md"
 	"docs/EVENT_SCHEMA_V2.md"
+	"docs/EVENT_SCHEMA_V3.md"
 	"docs/KERNEL_FILTERS.md"
 	"docs/TCP_LIFECYCLE.md"
 	"docs/V2_DESIGN.md"
