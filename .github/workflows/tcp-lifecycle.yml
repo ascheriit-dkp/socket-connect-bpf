@@ -1,6 +1,19 @@
 name: TCP lifecycle
 
 on:
+  push:
+    branches:
+      - v2
+    paths:
+      - '.github/workflows/tcp-lifecycle.yml'
+      - 'main.go'
+      - 'securitySocketConnectSrc.c'
+      - 'tcp_lifecycle_*.go'
+      - 'tcp_lifecycle_*.h'
+      - 'scripts/test-tcp-lifecycle.sh'
+      - 'scripts/test-tcp-lifecycle-filters.sh'
+      - 'scripts/test-tcp-lifecycle-table.sh'
+      - 'scripts/test-tcp-lifecycle-async.sh'
   pull_request:
     branches:
       - v2
