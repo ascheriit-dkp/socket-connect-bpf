@@ -62,6 +62,12 @@ required_documentation=(
 	"LICENSING.md"
 	"THIRD_PARTY_NOTICES.md"
 	"SECURITY.md"
+	"docs/BENCHMARKS.md"
+	"docs/EVENT_SCHEMA_V1.md"
+	"docs/EVENT_SCHEMA_V2.md"
+	"docs/KERNEL_FILTERS.md"
+	"docs/TCP_LIFECYCLE.md"
+	"docs/V2_DESIGN.md"
 )
 
 required_datasets=(
@@ -90,6 +96,7 @@ for architecture in amd64 arm64; do
 	fi
 
 	mkdir -p "${package_directory}/as"
+	mkdir -p "${package_directory}/docs"
 
 	install \
 		-m 0755 \
