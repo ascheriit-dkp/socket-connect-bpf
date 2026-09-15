@@ -66,13 +66,13 @@ func TestDecodeUDPEventIPv6(t *testing.T) {
 
 func TestValidateKernelUDPEventRejectsInvalidRecords(t *testing.T) {
 	tests := map[string]func(*kernelUDPEvent){
-		"ABI": func(event *kernelUDPEvent) { event.ABIVersion = 2 },
-		"type": func(event *kernelUDPEvent) { event.EventType = 2 },
-		"PID": func(event *kernelUDPEvent) { event.PID = 0 },
-		"timestamp": func(event *kernelUDPEvent) { event.KernelTimestampNS = 0 },
-		"port": func(event *kernelUDPEvent) { event.RemotePort = 0 },
-		"family": func(event *kernelUDPEvent) { event.AddressFamily = unix.AF_UNIX },
-		"length": func(event *kernelUDPEvent) { event.AddressLength = 16 },
+		"ABI":          func(event *kernelUDPEvent) { event.ABIVersion = 2 },
+		"type":         func(event *kernelUDPEvent) { event.EventType = 2 },
+		"PID":          func(event *kernelUDPEvent) { event.PID = 0 },
+		"timestamp":    func(event *kernelUDPEvent) { event.KernelTimestampNS = 0 },
+		"port":         func(event *kernelUDPEvent) { event.RemotePort = 0 },
+		"family":       func(event *kernelUDPEvent) { event.AddressFamily = unix.AF_UNIX },
+		"length":       func(event *kernelUDPEvent) { event.AddressLength = 16 },
 		"IPv4 padding": func(event *kernelUDPEvent) { event.RemoteAddress[4] = 1 },
 	}
 
@@ -89,15 +89,15 @@ func TestValidateKernelUDPEventRejectsInvalidRecords(t *testing.T) {
 
 func validKernelUDPEventIPv4() kernelUDPEvent {
 	event := kernelUDPEvent{
-		ABIVersion:       kernelUDPEventABIVersion,
-		EventType:        kernelUDPEventTypeSend,
-		AddressLength:    net.IPv4len,
-		AddressFamily:    unix.AF_INET,
-		RemotePort:       5353,
-		PID:              1234,
-		UID:              1000,
+		ABIVersion:        kernelUDPEventABIVersion,
+		EventType:         kernelUDPEventTypeSend,
+		AddressLength:     net.IPv4len,
+		AddressFamily:     unix.AF_INET,
+		RemotePort:        5353,
+		PID:               1234,
+		UID:               1000,
 		KernelTimestampNS: 123456,
-		CgroupID:         99,
+		CgroupID:          99,
 	}
 	copy(event.RemoteAddress[:], net.ParseIP("192.0.2.25").To4())
 	copy(event.Task[:], []byte("sender"))
