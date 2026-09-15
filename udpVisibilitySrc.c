@@ -6,7 +6,15 @@
 // +build ignore
 
 #include "vmlinux_compact_common.h"
+
+#if defined(__TARGET_ARCH_arm64)
+#include "vmlinux_compact_arm64.h"
+#elif defined(__TARGET_ARCH_x86)
+#include "vmlinux_compact_amd64.h"
+#endif
+
 #include "bpf_helpers.h"
+#include "bpf_tracing.h"
 #include "bpf_endian.h"
 
 #define TASK_COMM_LEN 16
@@ -14,12 +22,8 @@
 #define AF_INET 2
 #define AF_INET6 10
 
-#define IPPROTO_UDP 17
-
 #define UDP_EVENT_ABI_VERSION 1
 #define UDP_EVENT_SEND 1
-#define UDP_SEND_SOURCE_SENDTO 1
-#define UDP_SEND_SOURCE_SENDMSG 2
 
 #define UDP_EVENT_RING_SIZE (1 << 20)
 #define UDP_DROPPED_EVENT_COUNTER_KEY 0
@@ -41,7 +45,7 @@
 struct udp_event_t {
     u16 abi_version;
     u8 event_type;
-    u8 send_source;
+    u8 address_length;
     u16 address_family;
     u16 remote_port;
     u32 pid;
@@ -50,8 +54,6 @@ struct udp_event_t {
     u64 cgroup_id;
     u8 remote_address[UDP_ADDRESS_LENGTH_IPV6];
     char task[TASK_COMM_LEN];
-    u8 address_length;
-    u8 reserved[7];
 };
 
 struct udp_filter_config_t {
@@ -59,23 +61,17 @@ struct udp_filter_config_t {
     u32 family_mask;
 };
 
-struct syscall_enter_tracepoint_t {
-    u16 common_type;
-    u8 common_flags;
-    u8 common_preempt_count;
-    s32 common_pid;
-    s64 syscall_nr;
-    u64 args[6];
-};
-
-struct user_msghdr_name_t {
+// Only the stable prefix needed from kernel struct msghdr. udp_sendmsg and
+// udpv6_sendmsg receive a kernel msghdr whose msg_name points at a kernel copy
+// of the userspace destination when sendto/sendmsg supplied one.
+struct kernel_msghdr_name_t {
     u64 msg_name;
     u32 msg_namelen;
     u32 reserved;
 };
 
 _Static_assert(
-    sizeof(struct udp_event_t) == 72,
+    sizeof(struct udp_event_t) == 64,
     "udp_event_t must match the Go UDP event size"
 );
 _Static_assert(
@@ -95,12 +91,8 @@ _Static_assert(
     "udp_filter_config_t must match Go filter config size"
 );
 _Static_assert(
-    offsetof(struct syscall_enter_tracepoint_t, args) == 16,
-    "unexpected syscall-enter args offset"
-);
-_Static_assert(
-    sizeof(struct user_msghdr_name_t) == 16,
-    "unexpected user msghdr prefix size"
+    sizeof(struct kernel_msghdr_name_t) == 16,
+    "unexpected kernel msghdr prefix size"
 );
 
 struct {
@@ -207,7 +199,6 @@ static __always_inline void udp_record_dropped_event(void) {
 }
 
 static __always_inline int emit_udp_send(
-    u8 send_source,
     u16 family,
     u16 remote_port,
     u8 address_length,
@@ -231,17 +222,16 @@ static __always_inline int emit_udp_send(
     struct udp_event_t event = {
         .abi_version = UDP_EVENT_ABI_VERSION,
         .event_type = UDP_EVENT_SEND,
-        .send_source = send_source,
+        .address_length = address_length,
         .address_family = family,
         .remote_port = remote_port,
         .pid = pid,
         .uid = uid,
         .kernel_timestamp_ns = bpf_ktime_get_ns(),
-        .cgroup_id = bpf_get_current_cgroup_id(),
-        .address_length = address_length
+        .cgroup_id = bpf_get_current_cgroup_id()
     };
 
-    if (bpf_probe_read_user(
+    if (bpf_probe_read_kernel(
         event.remote_address,
         address_length,
         remote_address
@@ -265,30 +255,44 @@ static __always_inline int emit_udp_send(
     return 0;
 }
 
-static __always_inline int observe_udp_destination(
-    u8 send_source,
-    const void *user_address,
-    u32 user_address_length
-) {
-    if (user_address == NULL || user_address_length < sizeof(u16)) {
+static __always_inline int observe_udp_destination(const void *kernel_msghdr) {
+    if (kernel_msghdr == NULL) {
+        return 0;
+    }
+
+    struct kernel_msghdr_name_t message = {};
+    if (bpf_probe_read_kernel(
+        &message,
+        sizeof(message),
+        kernel_msghdr
+    ) < 0) {
+        return 0;
+    }
+
+    const void *address = (const void *)message.msg_name;
+    u32 address_length = message.msg_namelen;
+    if (address == NULL || address_length < sizeof(u16)) {
+        // Connected UDP sends carry no explicit destination here. Existing
+        // security_socket_connect observation remains the source of connected
+        // UDP destination visibility.
         return 0;
     }
 
     u16 family = 0;
-    if (bpf_probe_read_user(&family, sizeof(family), user_address) < 0) {
+    if (bpf_probe_read_kernel(&family, sizeof(family), address) < 0) {
         return 0;
     }
 
     if (family == AF_INET) {
-        if (user_address_length < sizeof(struct sockaddr_in)) {
+        if (address_length < sizeof(struct sockaddr_in)) {
             return 0;
         }
 
         struct sockaddr_in destination = {};
-        if (bpf_probe_read_user(
+        if (bpf_probe_read_kernel(
             &destination,
             sizeof(destination),
-            user_address
+            address
         ) < 0) {
             return 0;
         }
@@ -299,24 +303,23 @@ static __always_inline int observe_udp_destination(
         }
 
         return emit_udp_send(
-            send_source,
             AF_INET,
             port,
             UDP_ADDRESS_LENGTH_IPV4,
-            &((struct sockaddr_in *)user_address)->sin_addr.s_addr
+            &((struct sockaddr_in *)address)->sin_addr.s_addr
         );
     }
 
     if (family == AF_INET6) {
-        if (user_address_length < sizeof(struct sockaddr_in6)) {
+        if (address_length < sizeof(struct sockaddr_in6)) {
             return 0;
         }
 
         struct sockaddr_in6 destination = {};
-        if (bpf_probe_read_user(
+        if (bpf_probe_read_kernel(
             &destination,
             sizeof(destination),
-            user_address
+            address
         ) < 0) {
             return 0;
         }
@@ -327,50 +330,24 @@ static __always_inline int observe_udp_destination(
         }
 
         return emit_udp_send(
-            send_source,
             AF_INET6,
             port,
             UDP_ADDRESS_LENGTH_IPV6,
-            &((struct sockaddr_in6 *)user_address)->sin6_addr.in6_u.u6_addr8
+            &((struct sockaddr_in6 *)address)->sin6_addr.in6_u.u6_addr8
         );
     }
 
     return 0;
 }
 
-SEC("tracepoint/syscalls/sys_enter_sendto")
-int tracepoint_sys_enter_sendto(struct syscall_enter_tracepoint_t *ctx) {
-    const void *destination = (const void *)ctx->args[4];
-    u32 destination_length = (u32)ctx->args[5];
-
-    return observe_udp_destination(
-        UDP_SEND_SOURCE_SENDTO,
-        destination,
-        destination_length
-    );
+SEC("kprobe/udp_sendmsg")
+int kprobe_udp_sendmsg(struct pt_regs *ctx) {
+    return observe_udp_destination((const void *)PT_REGS_PARM2(ctx));
 }
 
-SEC("tracepoint/syscalls/sys_enter_sendmsg")
-int tracepoint_sys_enter_sendmsg(struct syscall_enter_tracepoint_t *ctx) {
-    const void *user_msghdr = (const void *)ctx->args[1];
-    if (user_msghdr == NULL) {
-        return 0;
-    }
-
-    struct user_msghdr_name_t message = {};
-    if (bpf_probe_read_user(
-        &message,
-        sizeof(message),
-        user_msghdr
-    ) < 0) {
-        return 0;
-    }
-
-    return observe_udp_destination(
-        UDP_SEND_SOURCE_SENDMSG,
-        (const void *)message.msg_name,
-        message.msg_namelen
-    );
+SEC("kprobe/udpv6_sendmsg")
+int kprobe_udpv6_sendmsg(struct pt_regs *ctx) {
+    return observe_udp_destination((const void *)PT_REGS_PARM2(ctx));
 }
 
 char LICENSE[] SEC("license") = "Dual MIT/GPL";
