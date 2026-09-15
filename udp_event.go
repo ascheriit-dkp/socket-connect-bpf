@@ -55,11 +55,23 @@ type udpEventPayload struct {
 	Protocol          string
 	AddressFamily     string
 	KernelTimestampNS uint64
-	PID               uint32
-	UID               uint32
-	CgroupID          uint64
-	Comm              string
-	Remote            tcpLifecycleEndpointPayload
+
+	PID                   uint32
+	UID                   uint32
+	CgroupID              uint64
+	Comm                  string
+	ProcessPath           string
+	ProcessArgs           string
+	User                  string
+	GID                   *uint32
+	ProcessStartTimeTicks *uint64
+	Parent                *tcpLifecycleProcessParentPayload
+	Cgroup                *tcpLifecycleCgroupPayload
+	Namespaces            *tcpLifecycleNamespacesPayload
+	Container             *tcpLifecycleContainerPayload
+	ASN                   *tcpLifecycleASNPayload
+
+	Remote tcpLifecycleEndpointPayload
 }
 
 func decodeUDPEventPayload(rawSample []byte, observedAt time.Time) (udpEventPayload, error) {
