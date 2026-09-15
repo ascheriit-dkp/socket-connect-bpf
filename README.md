@@ -424,9 +424,12 @@ Run the TCP lifecycle suites with:
     bash scripts/test-process-context.sh \
       ./bin/amd64/socket-connect-bpf
 
-Run the UDP live suite with:
+Run the UDP live suites with:
 
     bash scripts/test-udp-visibility.sh \
+      ./bin/amd64/socket-connect-bpf
+
+    bash scripts/test-udp-filters.sh \
       ./bin/amd64/socket-connect-bpf
 
 The live suites require Linux, suitable eBPF privileges through `sudo`, and the
@@ -458,6 +461,7 @@ The UDP CI validates real kernel behavior including:
 - explicit IPv4 destinations supplied through `sendto`;
 - explicit IPv4 destinations supplied through `sendmsg`;
 - IPv6 explicit destinations when IPv6 is available on the runner;
+- PID, UID, family, and destination-port filtering;
 - NDJSON schema version 3;
 - absence of TCP-style success and connection semantics;
 - process attribution;
