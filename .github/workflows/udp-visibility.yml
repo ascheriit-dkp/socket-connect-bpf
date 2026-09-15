@@ -14,6 +14,7 @@ on:
       - 'tcp_lifecycle_ndjson.go'
       - 'process_*.go'
       - 'scripts/test-udp-visibility.sh'
+      - 'scripts/test-udp-filters.sh'
   pull_request:
     branches:
       - v2
@@ -27,6 +28,7 @@ on:
       - 'tcp_lifecycle_ndjson.go'
       - 'process_*.go'
       - 'scripts/test-udp-visibility.sh'
+      - 'scripts/test-udp-filters.sh'
 
 permissions:
   contents: read
@@ -58,4 +60,11 @@ jobs:
         run: |
           set -euo pipefail
           bash scripts/test-udp-visibility.sh \
+            ./bin/amd64/socket-connect-bpf
+
+      - name: Run UDP kernel filter test
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/test-udp-filters.sh \
             ./bin/amd64/socket-connect-bpf
