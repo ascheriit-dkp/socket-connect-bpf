@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"net"
 	"testing"
 	"time"
 )
@@ -10,12 +11,14 @@ import (
 func TestTCPLifecycleNDJSONAddsDNSCorrelation(t *testing.T) {
 	restoreDNSFixture(t, "tcp.example.")
 
-	event := tcpLifecycleNDJSONEvent{
-		SchemaVersion: tcpLifecycleOutputSchemaVersion,
-		EventType:     tcpLifecycleEventTypeConnectAttempt,
-		Remote: tcpLifecycleNDJSONEndpoint{
-			IP: "192.0.2.40",
+	event, err := newTCPLifecycleNDJSONEvent(tcpLifecycleEventPayload{
+		EventType: tcpLifecycleEventTypeConnectAttempt,
+		Remote: tcpLifecycleEndpointPayload{
+			IP: net.ParseIP("192.0.2.40"),
 		},
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	assertDNSMetadata(t, event)
@@ -24,13 +27,12 @@ func TestTCPLifecycleNDJSONAddsDNSCorrelation(t *testing.T) {
 func TestUDPNDJSONAddsDNSCorrelation(t *testing.T) {
 	restoreDNSFixture(t, "udp.example.")
 
-	event := udpNDJSONEvent{
-		SchemaVersion: udpOutputSchemaVersion,
-		EventType:     udpEventTypeSend,
-		Remote: tcpLifecycleNDJSONEndpoint{
-			IP: "192.0.2.41",
+	event := newUDPNDJSONEvent(udpEventPayload{
+		EventType: udpEventTypeSend,
+		Remote: tcpLifecycleEndpointPayload{
+			IP: net.ParseIP("192.0.2.41"),
 		},
-	}
+	})
 
 	assertDNSMetadata(t, event)
 }
@@ -42,11 +44,14 @@ func TestNDJSONOmitsDNSWhenDisabled(t *testing.T) {
 		*dnsEnrichmentFlag = originalEnabled
 	})
 
-	event := tcpLifecycleNDJSONEvent{
-		SchemaVersion: tcpLifecycleOutputSchemaVersion,
-		Remote: tcpLifecycleNDJSONEndpoint{
-			IP: "192.0.2.42",
+	event, err := newTCPLifecycleNDJSONEvent(tcpLifecycleEventPayload{
+		EventType: tcpLifecycleEventTypeConnectAttempt,
+		Remote: tcpLifecycleEndpointPayload{
+			IP: net.ParseIP("192.0.2.42"),
 		},
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	encoded, err := json.Marshal(event)
