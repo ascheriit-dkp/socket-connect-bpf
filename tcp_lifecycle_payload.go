@@ -64,6 +64,7 @@ type tcpLifecycleEventPayload struct {
 	Namespaces            *tcpLifecycleNamespacesPayload
 	Container             *tcpLifecycleContainerPayload
 	ASN                   *tcpLifecycleASNPayload
+	DNS                   *dnsCorrelationPayload
 
 	Local  tcpLifecycleEndpointPayload
 	Remote tcpLifecycleEndpointPayload
