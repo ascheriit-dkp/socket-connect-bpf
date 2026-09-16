@@ -34,6 +34,7 @@ build: generate
 
 test:
 	go test ./...
+	bash scripts/test-export-examples.sh
 
 benchmark:
 	go test ./... \

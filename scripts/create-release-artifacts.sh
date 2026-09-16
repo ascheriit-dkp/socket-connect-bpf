@@ -68,9 +68,16 @@ required_documentation=(
 	"docs/EVENT_SCHEMA_V1.md"
 	"docs/EVENT_SCHEMA_V2.md"
 	"docs/EVENT_SCHEMA_V3.md"
+	"docs/EXPORT_INTEGRATIONS.md"
 	"docs/KERNEL_FILTERS.md"
 	"docs/TCP_LIFECYCLE.md"
 	"docs/V2_DESIGN.md"
+)
+
+required_examples=(
+	"examples/check_tcp_failures.py"
+	"examples/dns-observations.example.jsonl"
+	"examples/ndjson_to_csv.py"
 )
 
 required_datasets=(
@@ -80,6 +87,7 @@ required_datasets=(
 
 for required_file in \
 	"${required_documentation[@]}" \
+	"${required_examples[@]}" \
 	"${required_datasets[@]}"
 do
 	if [[ ! -f "${required_file}" ]]; then
@@ -100,6 +108,7 @@ for architecture in amd64 arm64; do
 
 	mkdir -p "${package_directory}/as"
 	mkdir -p "${package_directory}/docs"
+	mkdir -p "${package_directory}/examples"
 
 	install \
 		-m 0755 \
@@ -112,6 +121,19 @@ for architecture in amd64 arm64; do
 			"${documentation_file}" \
 			"${package_directory}/${documentation_file}"
 	done
+
+	install \
+		-m 0755 \
+		"examples/check_tcp_failures.py" \
+		"${package_directory}/examples/check_tcp_failures.py"
+	install \
+		-m 0755 \
+		"examples/ndjson_to_csv.py" \
+		"${package_directory}/examples/ndjson_to_csv.py"
+	install \
+		-m 0644 \
+		"examples/dns-observations.example.jsonl" \
+		"${package_directory}/examples/dns-observations.example.jsonl"
 
 	for dataset_file in "${required_datasets[@]}"; do
 		install \
