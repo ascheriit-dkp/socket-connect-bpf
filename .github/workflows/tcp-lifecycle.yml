@@ -8,9 +8,12 @@ on:
       - '.github/workflows/tcp-lifecycle.yml'
       - 'main.go'
       - 'securitySocketConnectSrc.c'
+      - 'argument_redaction*.go'
+      - 'linux/process.go'
       - 'process_*.go'
       - 'tcp_lifecycle_*.go'
       - 'tcp_lifecycle_*.h'
+      - 'scripts/test-argument-redaction.sh'
       - 'scripts/test-tcp-lifecycle.sh'
       - 'scripts/test-tcp-lifecycle-filters.sh'
       - 'scripts/test-tcp-lifecycle-table.sh'
@@ -23,9 +26,12 @@ on:
       - '.github/workflows/tcp-lifecycle.yml'
       - 'main.go'
       - 'securitySocketConnectSrc.c'
+      - 'argument_redaction*.go'
+      - 'linux/process.go'
       - 'process_*.go'
       - 'tcp_lifecycle_*.go'
       - 'tcp_lifecycle_*.h'
+      - 'scripts/test-argument-redaction.sh'
       - 'scripts/test-tcp-lifecycle.sh'
       - 'scripts/test-tcp-lifecycle-filters.sh'
       - 'scripts/test-tcp-lifecycle-table.sh'
@@ -90,4 +96,11 @@ jobs:
         run: |
           set -euo pipefail
           bash scripts/test-process-context.sh \
+            ./bin/amd64/socket-connect-bpf
+
+      - name: Run argument redaction integration test
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/test-argument-redaction.sh \
             ./bin/amd64/socket-connect-bpf
