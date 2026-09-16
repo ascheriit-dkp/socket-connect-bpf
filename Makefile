@@ -2,6 +2,11 @@ BINARY_NAME := socket-connect-bpf
 AMD64_DIR := bin/amd64
 ARM64_DIR := bin/arm64
 
+VERSION ?= devel
+COMMIT ?= $(shell git rev-parse HEAD 2>/dev/null || printf '%s' unknown)
+BUILD_DATE ?= $(shell git show -s --format=%cI HEAD 2>/dev/null || printf '%s' unknown)
+GO_LDFLAGS := -X main.buildVersion=$(VERSION) -X main.buildCommit=$(COMMIT) -X main.buildDate=$(BUILD_DATE)
+
 BENCHMARK_COUNT ?= 5
 BENCHMARK_TIME ?= 250ms
 BENCHMARK_CPU ?= 1,2,4
@@ -29,8 +34,8 @@ generate:
 
 build: generate
 	mkdir -p $(AMD64_DIR) $(ARM64_DIR)
-	GOOS=linux GOARCH=amd64 go build -o $(AMD64_DIR)/$(BINARY_NAME)
-	GOOS=linux GOARCH=arm64 go build -o $(ARM64_DIR)/$(BINARY_NAME)
+	GOOS=linux GOARCH=amd64 go build -ldflags "$(GO_LDFLAGS)" -o $(AMD64_DIR)/$(BINARY_NAME)
+	GOOS=linux GOARCH=arm64 go build -ldflags "$(GO_LDFLAGS)" -o $(ARM64_DIR)/$(BINARY_NAME)
 
 test:
 	go test ./...
