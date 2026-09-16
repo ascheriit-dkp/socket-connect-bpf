@@ -58,6 +58,7 @@ mkdir -p "${staging_root}"
 
 required_documentation=(
 	"README.md"
+	"CHANGELOG.md"
 	"LICENSE"
 	"LICENSING.md"
 	"THIRD_PARTY_NOTICES.md"
@@ -70,6 +71,7 @@ required_documentation=(
 	"docs/EVENT_SCHEMA_V3.md"
 	"docs/EXPORT_INTEGRATIONS.md"
 	"docs/KERNEL_FILTERS.md"
+	"docs/RELEASING.md"
 	"docs/TCP_LIFECYCLE.md"
 	"docs/V2_DESIGN.md"
 )

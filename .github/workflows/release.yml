@@ -1,0 +1,278 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+  artifact-metadata: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build, attest and publish
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Validate tag and v2 ancestry
+        id: metadata
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          if [[ ! "${TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "release tag must match vMAJOR.MINOR.PATCH exactly: ${TAG}" >&2
+            exit 1
+          fi
+
+          git fetch --no-tags origin v2:refs/remotes/origin/v2
+
+          release_commit="$(git rev-parse "${TAG}^{commit}")"
+          checked_out_commit="$(git rev-parse HEAD)"
+
+          if [[ "${checked_out_commit}" != "${release_commit}" ]]; then
+            echo "checked-out commit does not match release tag" >&2
+            exit 1
+          fi
+
+          if ! git merge-base --is-ancestor \
+            "${release_commit}" \
+            refs/remotes/origin/v2
+          then
+            echo "release tag ${TAG} is not reachable from v2" >&2
+            exit 1
+          fi
+
+          build_date="$(git show -s --format=%cI "${release_commit}")"
+          source_date_epoch="$(git show -s --format=%ct "${release_commit}")"
+
+          printf '%s\n' \
+            "version=${TAG}" \
+            "commit=${release_commit}" \
+            "build_date=${build_date}" \
+            "source_date_epoch=${source_date_epoch}" \
+            >>"${GITHUB_OUTPUT}"
+
+      - name: Check shell script syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n updateASData.sh scripts/*.sh
+
+      - name: Update AS data
+        run: ./updateASData.sh
+
+      - name: Build and test exact release
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ steps.metadata.outputs.version }}
+          RELEASE_COMMIT: ${{ steps.metadata.outputs.commit }}
+          RELEASE_BUILD_DATE: ${{ steps.metadata.outputs.build_date }}
+        run: |
+          set -euo pipefail
+          make all \
+            VERSION="${RELEASE_VERSION}" \
+            COMMIT="${RELEASE_COMMIT}" \
+            BUILD_DATE="${RELEASE_BUILD_DATE}"
+
+      - name: Verify binary version metadata
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ steps.metadata.outputs.version }}
+          RELEASE_COMMIT: ${{ steps.metadata.outputs.commit }}
+          RELEASE_BUILD_DATE: ${{ steps.metadata.outputs.build_date }}
+        run: |
+          set -euo pipefail
+
+          expected="socket-connect-bpf ${RELEASE_VERSION} commit=${RELEASE_COMMIT} built=${RELEASE_BUILD_DATE}"
+          actual="$(./bin/amd64/socket-connect-bpf --version)"
+
+          if [[ "${actual}" != "${expected}" ]]; then
+            echo "release version metadata mismatch" >&2
+            echo "expected: ${expected}" >&2
+            echo "actual:   ${actual}" >&2
+            exit 1
+          fi
+
+      - name: Create and verify reproducible release archives
+        shell: bash
+        env:
+          SOURCE_DATE_EPOCH: ${{ steps.metadata.outputs.source_date_epoch }}
+        run: |
+          set -euo pipefail
+
+          make release-artifacts
+          make verify-release-artifacts
+
+          cp artifacts/SHA256SUMS /tmp/socket-connect-bpf-SHA256SUMS.first
+
+          make release-artifacts
+          diff \
+            --unified \
+            /tmp/socket-connect-bpf-SHA256SUMS.first \
+            artifacts/SHA256SUMS
+          make verify-release-artifacts
+
+      - name: Generate amd64 SPDX SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          file: ./bin/amd64/socket-connect-bpf
+          format: spdx-json
+          output-file: artifacts/socket-connect-bpf-linux-amd64.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Generate arm64 SPDX SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          file: ./bin/arm64/socket-connect-bpf
+          format: spdx-json
+          output-file: artifacts/socket-connect-bpf-linux-arm64.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Attest release archive provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-checksums: artifacts/SHA256SUMS
+
+      - name: Attest amd64 binary SBOM
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: bin/amd64/socket-connect-bpf
+          sbom-path: artifacts/socket-connect-bpf-linux-amd64.spdx.json
+
+      - name: Attest arm64 binary SBOM
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: bin/arm64/socket-connect-bpf
+          sbom-path: artifacts/socket-connect-bpf-linux-arm64.spdx.json
+
+      - name: Create draft GitHub Release
+        id: draft_release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.metadata.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            is_draft="$(gh release view "${TAG}" --json isDraft --jq '.isDraft')"
+            if [[ "${is_draft}" == "true" ]]; then
+              gh release delete "${TAG}" --yes
+            else
+              echo "release ${TAG} is already published" >&2
+              exit 1
+            fi
+          fi
+
+          gh release create "${TAG}" \
+            artifacts/socket-connect-bpf-linux-amd64.tar.gz \
+            artifacts/socket-connect-bpf-linux-arm64.tar.gz \
+            artifacts/SHA256SUMS \
+            artifacts/socket-connect-bpf-linux-amd64.spdx.json \
+            artifacts/socket-connect-bpf-linux-arm64.spdx.json \
+            --draft \
+            --verify-tag \
+            --title "socket-connect-bpf ${TAG}" \
+            --generate-notes
+
+      - name: Verify draft release assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.metadata.outputs.version }}
+          RELEASE_COMMIT: ${{ steps.metadata.outputs.commit }}
+          RELEASE_BUILD_DATE: ${{ steps.metadata.outputs.build_date }}
+        run: |
+          set -euo pipefail
+
+          draft_directory="$(mktemp -d)"
+          gh release download "${TAG}" --dir "${draft_directory}"
+          bash scripts/verify-release-download.sh \
+            "${draft_directory}" \
+            "${TAG}" \
+            "${RELEASE_COMMIT}" \
+            "${RELEASE_BUILD_DATE}"
+          rm -rf "${draft_directory}"
+
+      - name: Publish GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.metadata.outputs.version }}
+        run: |
+          set -euo pipefail
+          gh release edit "${TAG}" \
+            --draft=false \
+            --latest \
+            --verify-tag
+
+      - name: Verify published release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.metadata.outputs.version }}
+          RELEASE_COMMIT: ${{ steps.metadata.outputs.commit }}
+          RELEASE_BUILD_DATE: ${{ steps.metadata.outputs.build_date }}
+        run: |
+          set -euo pipefail
+
+          published_directory="$(mktemp -d)"
+          gh release download "${TAG}" --dir "${published_directory}"
+          bash scripts/verify-release-download.sh \
+            "${published_directory}" \
+            "${TAG}" \
+            "${RELEASE_COMMIT}" \
+            "${RELEASE_BUILD_DATE}"
+
+          gh attestation verify \
+            "${published_directory}/socket-connect-bpf-linux-amd64.tar.gz" \
+            -R "${GITHUB_REPOSITORY}"
+          gh attestation verify \
+            "${published_directory}/socket-connect-bpf-linux-arm64.tar.gz" \
+            -R "${GITHUB_REPOSITORY}"
+
+          rm -rf "${published_directory}"
+
+      - name: Remove failed draft release
+        if: ${{ failure() }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.metadata.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${TAG}" ]]; then
+            exit 0
+          fi
+
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            is_draft="$(gh release view "${TAG}" --json isDraft --jq '.isDraft')"
+            if [[ "${is_draft}" == "true" ]]; then
+              gh release delete "${TAG}" --yes
+            fi
+          fi
