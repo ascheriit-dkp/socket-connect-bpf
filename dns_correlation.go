@@ -278,8 +278,9 @@ func (correlator *dnsCorrelator) Lookup(
 	}
 
 	correlator.mu.RLock()
+	defer correlator.mu.RUnlock()
+
 	candidates := correlator.entries[ip.String()]
-	correlator.mu.RUnlock()
 	if len(candidates) == 0 {
 		return nil
 	}
