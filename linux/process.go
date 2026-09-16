@@ -10,6 +10,23 @@ import (
 	"strings"
 )
 
+var processArgumentRedactor = func(value string) string {
+	return value
+}
+
+// SetProcessArgumentRedactor installs an optional userspace argument redactor.
+// The callback is configured before event workers start.
+func SetProcessArgumentRedactor(redactor func(string) string) {
+	if redactor == nil {
+		processArgumentRedactor = func(value string) string {
+			return value
+		}
+		return
+	}
+
+	processArgumentRedactor = redactor
+}
+
 // PathForPid should retrieve the Process Path for a given PID.
 // TODO return error
 func ProcessPathForPid(pid int) string {
@@ -52,5 +69,5 @@ func ProcessArgsForPid(pid int) string {
 
 	parts := strings.Split(string(bytes.TrimRight(data, string("\x00"))), string(byte(0)))
 
-	return strings.Join(parts[1:], " ")
+	return processArgumentRedactor(strings.Join(parts[1:], " "))
 }

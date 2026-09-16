@@ -99,10 +99,12 @@ func newTCPLifecycleEnricherWithLookups(
 func defaultTCPLifecycleEnrichmentLookups() tcpLifecycleEnrichmentLookups {
 	return tcpLifecycleEnrichmentLookups{
 		processPath: linux.ProcessPathForPid,
-		processArgs: linux.ProcessArgsForPid,
-		username:    lookupTCPLifecycleUsername,
-		context:     lookupProcessContext,
-		asn:         lookupTCPLifecycleASN,
+		processArgs: func(pid int) string {
+			return redactProcessArguments(linux.ProcessArgsForPid(pid))
+		},
+		username: lookupTCPLifecycleUsername,
+		context:  lookupProcessContext,
+		asn:      lookupTCPLifecycleASN,
 	}
 }
 

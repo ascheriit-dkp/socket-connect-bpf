@@ -303,7 +303,7 @@ func lookupProcessArguments(pid int) string {
 		return ""
 	}
 
-	return strings.Join(parts[1:], " ")
+	return redactProcessArguments(strings.Join(parts[1:], " "))
 }
 
 func lookupProcessUsername(uid uint32) string {
