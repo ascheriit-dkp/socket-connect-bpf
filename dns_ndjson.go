@@ -14,39 +14,12 @@
 
 package main
 
-import (
-	"encoding/json"
-	"net"
-)
+import "net"
 
 type dnsNDJSONPayload struct {
 	Name       string `json:"name"`
 	Source     string `json:"source"`
 	Confidence string `json:"confidence"`
-}
-
-func (event tcpLifecycleNDJSONEvent) MarshalJSON() ([]byte, error) {
-	type eventAlias tcpLifecycleNDJSONEvent
-
-	return json.Marshal(struct {
-		eventAlias
-		DNS *dnsNDJSONPayload `json:"dns,omitempty"`
-	}{
-		eventAlias: eventAlias(event),
-		DNS:        dnsNDJSONForRemote(event.Remote.IP),
-	})
-}
-
-func (event udpNDJSONEvent) MarshalJSON() ([]byte, error) {
-	type eventAlias udpNDJSONEvent
-
-	return json.Marshal(struct {
-		eventAlias
-		DNS *dnsNDJSONPayload `json:"dns,omitempty"`
-	}{
-		eventAlias: eventAlias(event),
-		DNS:        dnsNDJSONForRemote(event.Remote.IP),
-	})
 }
 
 func dnsNDJSONForRemote(remoteIP string) *dnsNDJSONPayload {
