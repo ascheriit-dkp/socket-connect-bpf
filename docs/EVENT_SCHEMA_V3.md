@@ -92,6 +92,25 @@ optional top-level `asn` object may be emitted with:
 - `number`: autonomous-system number;
 - `name`: autonomous-system name when available.
 
+## DNS object
+
+When one or more `--dns-observations` files are loaded and a valid observation
+matches the remote IP at the event time, an optional top-level `dns` object may
+be emitted with:
+
+- `name`: correlated DNS name;
+- `source`: identifier supplied by the observation source;
+- `confidence`: `high` or `medium`;
+- `observed_at`: UTC timestamp of the DNS observation;
+- `expires_at`: UTC expiry derived from the observation TTL.
+
+`high` means the observation also names the same PID as the UDP event.
+`medium` means the observation is process-agnostic.
+
+DNS metadata is correlation, not proof that a specific send was caused by that
+DNS answer. The tracer does not generate reverse lookups or other DNS traffic.
+See `DNS_CORRELATION.md` for the complete contract.
+
 ## Remote endpoint
 
 `remote` contains:
@@ -119,7 +138,7 @@ explicit IPv4 and IPv6 destinations.
 ## Example
 
 ```json
-{"schema_version":3,"event_type":"udp_send","observed_at":"2026-09-15T20:00:00Z","kernel_timestamp_ns":123456,"protocol":"udp","address_family":"AF_INET","process":{"pid":1234,"uid":1000,"comm":"sender","executable":"/usr/bin/python3","user":"alice","cgroup":{"id":99,"path":"/user.slice/user-1000.slice/session-2.scope"}},"remote":{"ip":"192.0.2.25","port":5353}}
+{"schema_version":3,"event_type":"udp_send","observed_at":"2026-09-16T08:00:02Z","kernel_timestamp_ns":123456,"protocol":"udp","address_family":"AF_INET","process":{"pid":1234,"uid":1000,"comm":"sender","executable":"/usr/bin/python3","user":"alice","cgroup":{"id":99,"path":"/user.slice/user-1000.slice/session-2.scope"}},"remote":{"ip":"192.0.2.25","port":5353},"dns":{"name":"service.example","source":"resolver-log","confidence":"high","observed_at":"2026-09-16T08:00:00Z","expires_at":"2026-09-16T08:01:00Z"}}
 ```
 
 ## Compatibility
