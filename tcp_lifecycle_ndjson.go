@@ -46,6 +46,7 @@ type tcpLifecycleNDJSONEvent struct {
 	Local                tcpLifecycleNDJSONEndpoint `json:"local"`
 	Remote               tcpLifecycleNDJSONEndpoint `json:"remote"`
 	ASN                  *tcpLifecycleNDJSONASN     `json:"asn,omitempty"`
+	DNS                  *dnsCorrelationNDJSON      `json:"dns,omitempty"`
 	Result               string                     `json:"result,omitempty"`
 	FailureSource        string                     `json:"failure_source,omitempty"`
 	Errno                *int32                     `json:"errno,omitempty"`
@@ -160,6 +161,7 @@ func newTCPLifecycleNDJSONEvent(
 		},
 		Local:  newTCPLifecycleNDJSONEndpoint(event.Local),
 		Remote: newTCPLifecycleNDJSONEndpoint(event.Remote),
+		DNS:    newDNSCorrelationNDJSON(event.DNS),
 	}
 
 	if event.ASN != nil {
