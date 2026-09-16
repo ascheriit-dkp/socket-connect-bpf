@@ -39,6 +39,7 @@ type udpNDJSONEvent struct {
 	Process           tcpLifecycleNDJSONProcess  `json:"process"`
 	Remote            tcpLifecycleNDJSONEndpoint `json:"remote"`
 	ASN               *tcpLifecycleNDJSONASN     `json:"asn,omitempty"`
+	DNS               *dnsNDJSONPayload          `json:"dns,omitempty"`
 }
 
 func newUDPNDJSONOutputWithWriter(writer io.Writer) *udpNDJSONOutput {
@@ -94,6 +95,7 @@ func newUDPNDJSONEvent(event udpEventPayload) udpNDJSONEvent {
 		AddressFamily:     event.AddressFamily,
 		Process:           process,
 		Remote:            remote,
+		DNS:               dnsNDJSONForRemote(remote.IP),
 	}
 	if event.ASN != nil {
 		jsonEvent.ASN = &tcpLifecycleNDJSONASN{

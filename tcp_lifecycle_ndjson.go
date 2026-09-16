@@ -46,6 +46,7 @@ type tcpLifecycleNDJSONEvent struct {
 	Local                tcpLifecycleNDJSONEndpoint `json:"local"`
 	Remote               tcpLifecycleNDJSONEndpoint `json:"remote"`
 	ASN                  *tcpLifecycleNDJSONASN     `json:"asn,omitempty"`
+	DNS                  *dnsNDJSONPayload          `json:"dns,omitempty"`
 	Result               string                     `json:"result,omitempty"`
 	FailureSource        string                     `json:"failure_source,omitempty"`
 	Errno                *int32                     `json:"errno,omitempty"`
@@ -168,6 +169,7 @@ func newTCPLifecycleNDJSONEvent(
 			Name:   event.ASN.Name,
 		}
 	}
+	jsonEvent.DNS = dnsNDJSONForRemote(jsonEvent.Remote.IP)
 
 	switch event.EventType {
 	case tcpLifecycleEventTypeConnectAttempt:

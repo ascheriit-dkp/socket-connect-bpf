@@ -73,8 +73,14 @@ func formatUDPRemote(endpoint tcpLifecycleEndpointPayload) string {
 	if endpoint.IP == nil || endpoint.Port == nil {
 		return "-"
 	}
-	return net.JoinHostPort(
+
+	remote := net.JoinHostPort(
 		endpoint.IP.String(),
 		strconv.Itoa(int(*endpoint.Port)),
 	)
+	if dns := formatDNSCorrelation(lookupDNSCorrelation(endpoint.IP)); dns != "" {
+		remote += " (" + dns + ")"
+	}
+
+	return remote
 }

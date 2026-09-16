@@ -118,6 +118,20 @@ a top-level `asn` object may be emitted:
 ASN enrichment is optional. Absence of a match is represented by omission of
 the `asn` field.
 
+## DNS object
+
+When `--dns` is enabled and reverse lookup of the remote IP succeeds, an
+optional top-level `dns` object may be emitted:
+
+- `name`: normalized PTR name returned by the resolver;
+- `source`: `reverse_dns`;
+- `confidence`: `low`.
+
+This metadata does not prove that the initiating process requested, queried, or
+used the returned hostname. It is only a reverse-DNS correlation for the
+observed IP at enrichment time. See `DNS_ENRICHMENT.md` for cache, timeout,
+privacy, and performance semantics.
+
 ## Endpoint objects
 
 Endpoint objects may contain:

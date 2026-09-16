@@ -83,7 +83,7 @@ func (output *tcpLifecycleTableOutput) WriteEvent(
 		formatTCPLifecycleTableProcess(event),
 		sanitizeTerminalField(formatTCPLifecycleTableOptionalText(event.User)),
 		sanitizeTerminalField(formatTCPLifecycleTableEndpoint(event.Local)),
-		sanitizeTerminalField(formatTCPLifecycleTableEndpoint(event.Remote)),
+		sanitizeTerminalField(formatTCPLifecycleTableRemote(event.Remote)),
 		result,
 		formatTCPLifecycleTableError(event.Error),
 		formatTCPLifecycleTableOptionalUint64(event.ConnectLatencyNS),
@@ -150,6 +150,20 @@ func formatTCPLifecycleTableEndpoint(
 	default:
 		return "-"
 	}
+}
+
+func formatTCPLifecycleTableRemote(
+	endpoint tcpLifecycleEndpointPayload,
+) string {
+	remote := formatTCPLifecycleTableEndpoint(endpoint)
+	if endpoint.IP == nil {
+		return remote
+	}
+
+	if dns := formatDNSCorrelation(lookupDNSCorrelation(endpoint.IP)); dns != "" {
+		remote += " (" + dns + ")"
+	}
+	return remote
 }
 
 func formatTCPLifecycleTableError(value string) string {
