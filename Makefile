@@ -39,6 +39,11 @@ build: generate
 
 test:
 	go test ./...
+	bash scripts/test-build-version.sh \
+		$(AMD64_DIR)/$(BINARY_NAME) \
+		"$(VERSION)" \
+		"$(COMMIT)" \
+		"$(BUILD_DATE)"
 	bash scripts/test-export-examples.sh
 
 benchmark:
