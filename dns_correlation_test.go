@@ -144,39 +144,53 @@ func TestLoadDNSObservations(t *testing.T) {
 		t.Fatalf("first name = %q, want api.example", observations[0].Name)
 	}
 	if observations[1].Source != defaultDNSObservationSource {
-		t.Fatalf("second source = %q, want %q", observations[1].Source, defaultDNSObservationSource)
+		t.Fatalf(
+			"second source = %q, want %q",
+			observations[1].Source,
+			defaultDNSObservationSource,
+		)
 	}
 }
 
 func TestLoadDNSObservationsRejectsInvalidRecords(t *testing.T) {
 	tests := []struct {
-		name    string
-		record  string
+		name     string
+		record   string
 		contains string
 	}{
 		{
-			name: "invalid IP",
-			record: `{"ip":"nope","name":"x.example","observed_at":"2026-09-16T08:00:00Z","ttl_seconds":60}`,
+			name:     "invalid IP",
+			record:   `{"ip":"nope","name":"x.example","observed_at":"2026-09-16T08:00:00Z","ttl_seconds":60}`,
 			contains: "invalid IP",
 		},
 		{
-			name: "zero TTL",
-			record: `{"ip":"203.0.113.1","name":"x.example","observed_at":"2026-09-16T08:00:00Z","ttl_seconds":0}`,
+			name:     "zero TTL",
+			record:   `{"ip":"203.0.113.1","name":"x.example","observed_at":"2026-09-16T08:00:00Z","ttl_seconds":0}`,
 			contains: "ttl_seconds",
 		},
 		{
-			name: "unknown field",
-			record: `{"ip":"203.0.113.1","name":"x.example","observed_at":"2026-09-16T08:00:00Z","ttl_seconds":60,"extra":true}`,
+			name:     "unknown field",
+			record:   `{"ip":"203.0.113.1","name":"x.example","observed_at":"2026-09-16T08:00:00Z","ttl_seconds":60,"extra":true}`,
 			contains: "unknown field",
+		},
+		{
+			name:     "trailing JSON",
+			record:   `{"ip":"203.0.113.1","name":"x.example","observed_at":"2026-09-16T08:00:00Z","ttl_seconds":60} {"extra":true}`,
+			contains: "trailing data",
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "dns.jsonl")
-			if err := os.WriteFile(path, []byte(test.record+"\n"), 0o600); err != nil {
+			if err := os.WriteFile(
+				path,
+				[]byte(test.record+"\n"),
+				0o600,
+			); err != nil {
 				t.Fatal(err)
 			}
+
 			_, err := loadDNSObservations(path)
 			if err == nil {
 				t.Fatal("loadDNSObservations() error = nil")
@@ -191,7 +205,9 @@ func TestLoadDNSObservationsRejectsInvalidRecords(t *testing.T) {
 func TestDNSObservationFileFlagLoadsData(t *testing.T) {
 	original := activeDNSCorrelator
 	activeDNSCorrelator = newDNSCorrelator()
-	t.Cleanup(func() { activeDNSCorrelator = original })
+	t.Cleanup(func() {
+		activeDNSCorrelator = original
+	})
 
 	path := filepath.Join(t.TempDir(), "dns.jsonl")
 	content := fmt.Sprintf(
