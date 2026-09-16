@@ -213,6 +213,71 @@ can snapshot it. See [NDJSON Event Schema v2](docs/EVENT_SCHEMA_V2.md) and
 [NDJSON Event Schema v3](docs/EVENT_SCHEMA_V3.md) for the exact optional fields
 and semantics.
 
+### DNS correlation
+
+Optional DNS correlation is loaded from user-supplied JSONL observations:
+
+    sudo ./socket-connect-bpf \
+      --tcp-lifecycle \
+      --output ndjson \
+      --dns-observations /path/to/dns-observations.jsonl
+
+The flag may be repeated. The tracer does not perform PTR or other DNS network
+lookups itself.
+
+TCP lifecycle schema v2 and UDP schema v3 may emit an optional `dns` object with
+the correlated name, source, confidence, observation time, and expiry. A
+PID-specific observation is higher confidence than a process-agnostic IP
+observation. Expired, future, and PID-mismatched observations are ignored.
+
+DNS metadata is correlation, not proof that a network event was caused by a DNS
+response. See [DNS correlation](docs/DNS_CORRELATION.md) for the input format
+and exact confidence semantics.
+
+### Argument redaction
+
+When `-a` captures process arguments, repeated `--redact-arg` rules can replace
+matching text before it is retained in userspace enrichment caches or emitted:
+
+    sudo ./socket-connect-bpf \
+      --tcp-lifecycle \
+      -a \
+      --redact-arg '(?i)(token|password|secret)=[^ ]+' \
+      --output ndjson
+
+Rules are Go regular expressions and matching text is replaced with
+`[REDACTED]`. Redaction is pattern-based; unmatched sensitive values are not
+automatically detected.
+
+The same configured redaction behavior applies to compatibility, TCP lifecycle,
+and UDP output. See [Process argument redaction](docs/ARGUMENT_REDACTION.md).
+
+## Export and integrations
+
+NDJSON is the automation interface. Keep event stdout separate from diagnostic
+stderr:
+
+    sudo ./socket-connect-bpf \
+      --tcp-lifecycle \
+      --output ndjson \
+      >events.ndjson \
+      2>tracer.log
+
+The repository includes tested examples for common integration work:
+
+- `examples/ndjson_to_csv.py`: schema v1/v2/v3 NDJSON to a common CSV view;
+- `examples/check_tcp_failures.py`: minimal schema v2 CI failure gate;
+- `examples/dns-observations.example.jsonl`: DNS observation input fixture.
+
+Example:
+
+    python3 examples/ndjson_to_csv.py \
+      <events.ndjson \
+      >events.csv
+
+See [Export and integration examples](docs/EXPORT_INTEGRATIONS.md) for jq,
+streaming, CSV, CI, DNS, and redaction examples.
+
 ## Kernel-side filtering
 
 The tracer supports kernel-side filters for:
@@ -333,6 +398,14 @@ Developers can refresh the datasets with:
         Load ASN datasets from DIRECTORY instead of the as directory beside
         the executable. Used when -a is enabled.
 
+    --dns-observations FILE
+        Load DNS observation JSONL for optional IP-to-name correlation. May be
+        repeated. Does not cause network DNS lookups.
+
+    --redact-arg REGEX
+        Replace matching process-argument text with [REDACTED]. May be repeated.
+        Applies to arguments captured with -a.
+
     --pid PID
         Emit events whose initiating process ID matches PID. May be repeated.
 
@@ -365,8 +438,8 @@ Release archives are produced for:
 - `socket-connect-bpf-linux-amd64.tar.gz`
 - `socket-connect-bpf-linux-arm64.tar.gz`
 
-Each archive contains the executable, ASN datasets, documentation, and
-licensing files.
+Each archive contains the executable, ASN datasets, documentation, tested
+integration examples, and licensing files.
 
 Keep the executable and its accompanying `as` directory together when using
 ASN enrichment.
@@ -402,6 +475,10 @@ Run Go tests directly with:
 
     go test ./...
 
+Run the export/integration example tests with:
+
+    bash scripts/test-export-examples.sh
+
 Run the existing live kernel-filter suite with:
 
     bash scripts/test-kernel-filters.sh \
@@ -422,6 +499,12 @@ Run the TCP lifecycle suites with:
       ./bin/amd64/socket-connect-bpf
 
     bash scripts/test-process-context.sh \
+      ./bin/amd64/socket-connect-bpf
+
+    bash scripts/test-argument-redaction.sh \
+      ./bin/amd64/socket-connect-bpf
+
+    bash scripts/test-dns-correlation.sh \
       ./bin/amd64/socket-connect-bpf
 
 Run the UDP live suites with:
@@ -449,6 +532,8 @@ The lifecycle CI validates real kernel behavior including:
 - initiating-process enrichment preservation;
 - exec/exit process attribution and PID-generation preservation;
 - parent, cgroup, namespace, and best-effort container context;
+- argument redaction;
+- DNS correlation;
 - PID, UID, family, and port filtering;
 - NDJSON schema version 2;
 - lifecycle table output;
@@ -468,7 +553,7 @@ The UDP CI validates real kernel behavior including:
 - clean shutdown and UDP event-loss reporting.
 
 The normal Go workflow additionally retains generation, formatting, unit-test,
-integration, benchmark, and reproducible release checks.
+integration, benchmark, export-example, and reproducible release checks.
 
 ## Release artifacts
 
@@ -506,8 +591,12 @@ trace:
 - per-packet latency.
 
 See [TCP lifecycle contract](docs/TCP_LIFECYCLE.md),
-[NDJSON Event Schema v2](docs/EVENT_SCHEMA_V2.md), and
-[NDJSON Event Schema v3](docs/EVENT_SCHEMA_V3.md) for detailed semantics.
+[NDJSON Event Schema v2](docs/EVENT_SCHEMA_V2.md),
+[NDJSON Event Schema v3](docs/EVENT_SCHEMA_V3.md),
+[DNS correlation](docs/DNS_CORRELATION.md),
+[Process argument redaction](docs/ARGUMENT_REDACTION.md), and
+[Export and integration examples](docs/EXPORT_INTEGRATIONS.md) for detailed
+semantics and integration guidance.
 
 ## License
 
