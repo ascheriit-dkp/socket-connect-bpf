@@ -92,6 +92,20 @@ optional top-level `asn` object may be emitted with:
 - `number`: autonomous-system number;
 - `name`: autonomous-system name when available.
 
+## DNS object
+
+When `--dns` is enabled and reverse lookup of the remote IP succeeds, an
+optional top-level `dns` object may be emitted with:
+
+- `name`: normalized PTR name returned by the resolver;
+- `source`: `reverse_dns`;
+- `confidence`: `low`.
+
+This metadata does not prove that the sending process requested, queried, or
+used the returned hostname. It is only a reverse-DNS correlation for the
+observed IP at enrichment time. See `DNS_ENRICHMENT.md` for cache, timeout,
+privacy, and performance semantics.
+
 ## Remote endpoint
 
 `remote` contains:
