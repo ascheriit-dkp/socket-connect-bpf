@@ -63,6 +63,7 @@ required_documentation=(
 	"THIRD_PARTY_NOTICES.md"
 	"SECURITY.md"
 	"docs/BENCHMARKS.md"
+	"docs/DNS_CORRELATION.md"
 	"docs/EVENT_SCHEMA_V1.md"
 	"docs/EVENT_SCHEMA_V2.md"
 	"docs/EVENT_SCHEMA_V3.md"
