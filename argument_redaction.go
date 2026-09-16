@@ -19,6 +19,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/ascheriit-dkp/socket-connect-bpf/linux"
 )
 
 const maxArgumentRedactionPatterns = 64
@@ -31,6 +33,10 @@ var activeArgumentRedactor = &argumentRedactor{}
 var registeredArgumentRedactionPatterns = registerArgumentRedactionFlags(
 	flag.CommandLine,
 )
+
+func init() {
+	linux.SetProcessArgumentRedactor(redactProcessArguments)
+}
 
 func (values *argumentRedactionPatternValues) String() string {
 	if values == nil {
@@ -120,19 +126,23 @@ func newArgumentRedactor(patterns []string) (*argumentRedactor, error) {
 }
 
 func (redactor *argumentRedactor) Redact(value string) string {
-	if redactor == nil || value == "" {
+	if redactor == nil || value == "" || len(redactor.patterns) == 0 {
 		return value
 	}
 
-	redacted := value
-	for _, pattern := range redactor.patterns {
-		redacted = pattern.ReplaceAllString(
-			redacted,
-			argumentRedactionReplacement,
-		)
+	segments := strings.Split(value, argumentRedactionReplacement)
+	for index, segment := range segments {
+		redacted := segment
+		for _, pattern := range redactor.patterns {
+			redacted = pattern.ReplaceAllString(
+				redacted,
+				argumentRedactionReplacement,
+			)
+		}
+		segments[index] = redacted
 	}
 
-	return redacted
+	return strings.Join(segments, argumentRedactionReplacement)
 }
 
 func redactProcessArguments(value string) string {
