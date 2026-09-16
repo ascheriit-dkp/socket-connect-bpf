@@ -132,6 +132,7 @@ expected_members = {
     "THIRD_PARTY_NOTICES.md": ("file", 0o644),
     "SECURITY.md": ("file", 0o644),
     "docs/BENCHMARKS.md": ("file", 0o644),
+    "docs/DNS_CORRELATION.md": ("file", 0o644),
     "docs/EVENT_SCHEMA_V1.md": ("file", 0o644),
     "docs/EVENT_SCHEMA_V2.md": ("file", 0o644),
     "docs/EVENT_SCHEMA_V3.md": ("file", 0o644),
