@@ -62,6 +62,7 @@ required_documentation=(
 	"LICENSING.md"
 	"THIRD_PARTY_NOTICES.md"
 	"SECURITY.md"
+	"docs/ARGUMENT_REDACTION.md"
 	"docs/BENCHMARKS.md"
 	"docs/DNS_CORRELATION.md"
 	"docs/EVENT_SCHEMA_V1.md"
