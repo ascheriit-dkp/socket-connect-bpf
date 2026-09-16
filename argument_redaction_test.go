@@ -25,6 +25,20 @@ func TestArgumentRedactorRedactsConfiguredPatterns(t *testing.T) {
 	}
 }
 
+func TestArgumentRedactorIsIdempotent(t *testing.T) {
+	redactor, err := newArgumentRedactor([]string{`.`})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	once := redactor.Redact("secret")
+	twice := redactor.Redact(once)
+
+	if twice != once {
+		t.Fatalf("second Redact() = %q, want %q", twice, once)
+	}
+}
+
 func TestArgumentRedactorWithoutPatternsPreservesInput(t *testing.T) {
 	redactor, err := newArgumentRedactor(nil)
 	if err != nil {
