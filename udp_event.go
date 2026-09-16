@@ -70,6 +70,7 @@ type udpEventPayload struct {
 	Namespaces            *tcpLifecycleNamespacesPayload
 	Container             *tcpLifecycleContainerPayload
 	ASN                   *tcpLifecycleASNPayload
+	DNS                   *dnsCorrelationPayload
 
 	Remote tcpLifecycleEndpointPayload
 }
