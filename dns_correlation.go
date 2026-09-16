@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"strings"
@@ -27,7 +28,7 @@ import (
 )
 
 const (
-	maxDNSCorrelationEntries = 65536
+	maxDNSCorrelationEntries  = 65536
 	maxDNSObservationLineSize = 64 * 1024
 
 	dnsConfidenceHigh   = "high"
@@ -77,6 +78,7 @@ func (values *dnsObservationFileValues) String() string {
 	if values == nil {
 		return ""
 	}
+
 	return strings.Join(*values, ",")
 }
 
@@ -98,13 +100,16 @@ func (values *dnsObservationFileValues) Set(path string) error {
 	return nil
 }
 
-func registerDNSCorrelationFlags(flagSet *flag.FlagSet) *dnsObservationFileValues {
+func registerDNSCorrelationFlags(
+	flagSet *flag.FlagSet,
+) *dnsObservationFileValues {
 	values := &dnsObservationFileValues{}
 	flagSet.Var(
 		values,
 		"dns-observations",
 		"load DNS observation JSONL for optional IP-to-name correlation; may be repeated",
 	)
+
 	return values
 }
 
@@ -137,6 +142,19 @@ func loadDNSObservations(path string) ([]dnsObservation, error) {
 		if err := decoder.Decode(&record); err != nil {
 			return nil, fmt.Errorf(
 				"parse DNS observations %q line %d: %w",
+				path,
+				lineNumber,
+				err,
+			)
+		}
+
+		var trailing interface{}
+		if err := decoder.Decode(&trailing); err != io.EOF {
+			if err == nil {
+				err = fmt.Errorf("multiple JSON values")
+			}
+			return nil, fmt.Errorf(
+				"parse DNS observations %q line %d: trailing data: %w",
 				path,
 				lineNumber,
 				err,
@@ -183,9 +201,16 @@ func newDNSObservation(record dnsObservationRecord) (dnsObservation, error) {
 		return dnsObservation{}, fmt.Errorf("DNS name exceeds 253 bytes")
 	}
 
-	observedAt, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(record.ObservedAt))
+	observedAt, err := time.Parse(
+		time.RFC3339Nano,
+		strings.TrimSpace(record.ObservedAt),
+	)
 	if err != nil {
-		return dnsObservation{}, fmt.Errorf("invalid observed_at %q: %w", record.ObservedAt, err)
+		return dnsObservation{}, fmt.Errorf(
+			"invalid observed_at %q: %w",
+			record.ObservedAt,
+			err,
+		)
 	}
 	if record.TTLSeconds == 0 {
 		return dnsObservation{}, fmt.Errorf("ttl_seconds must be greater than zero")
@@ -199,13 +224,21 @@ func newDNSObservation(record dnsObservationRecord) (dnsObservation, error) {
 		return dnsObservation{}, fmt.Errorf("DNS source exceeds 64 bytes")
 	}
 
+	var pid *uint32
+	if record.PID != nil {
+		copiedPID := *record.PID
+		pid = &copiedPID
+	}
+
 	return dnsObservation{
 		IP:         ip.String(),
 		Name:       name,
 		Source:     source,
 		ObservedAt: observedAt,
-		ExpiresAt:  observedAt.Add(time.Duration(record.TTLSeconds) * time.Second),
-		PID:        cloneUint32Pointer(record.PID),
+		ExpiresAt: observedAt.Add(
+			time.Duration(record.TTLSeconds) * time.Second,
+		),
+		PID: pid,
 	}, nil
 }
 
@@ -255,7 +288,8 @@ func (correlator *dnsCorrelator) Lookup(
 	bestConfidence := ""
 	for index := range candidates {
 		candidate := &candidates[index]
-		if observedAt.Before(candidate.ObservedAt) || observedAt.After(candidate.ExpiresAt) {
+		if observedAt.Before(candidate.ObservedAt) ||
+			observedAt.After(candidate.ExpiresAt) {
 			continue
 		}
 
@@ -269,7 +303,8 @@ func (correlator *dnsCorrelator) Lookup(
 
 		if best == nil ||
 			confidenceRank(confidence) > confidenceRank(bestConfidence) ||
-			(confidence == bestConfidence && candidate.ObservedAt.After(best.ObservedAt)) {
+			(confidence == bestConfidence &&
+				candidate.ObservedAt.After(best.ObservedAt)) {
 			best = candidate
 			bestConfidence = confidence
 		}
@@ -311,6 +346,7 @@ func cloneDNSCorrelation(value *dnsCorrelationPayload) *dnsCorrelationPayload {
 	if value == nil {
 		return nil
 	}
+
 	copied := *value
 	return &copied
 }
