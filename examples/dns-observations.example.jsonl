@@ -1,0 +1,2 @@
+{"ip":"203.0.113.10","name":"api.example.test","observed_at":"2026-09-16T12:00:00Z","ttl_seconds":300,"source":"resolver-log"}
+{"ip":"2001:db8::10","name":"v6.example.test","observed_at":"2026-09-16T12:00:00Z","ttl_seconds":300,"pid":4242,"source":"resolver-log"}
