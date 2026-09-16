@@ -118,6 +118,25 @@ a top-level `asn` object may be emitted:
 ASN enrichment is optional. Absence of a match is represented by omission of
 the `asn` field.
 
+## DNS object
+
+When one or more `--dns-observations` files are loaded and a valid observation
+matches the remote IP at the event time, an optional top-level `dns` object may
+be emitted:
+
+- `name`: correlated DNS name;
+- `source`: identifier supplied by the observation source;
+- `confidence`: `high` or `medium`;
+- `observed_at`: UTC timestamp of the DNS observation;
+- `expires_at`: UTC expiry derived from the observation TTL.
+
+`high` means the observation also names the same PID as the TCP lifecycle
+event. `medium` means the observation is process-agnostic.
+
+DNS metadata is correlation, not proof that a specific connection was caused
+by that DNS answer. The tracer does not generate reverse lookups or other DNS
+traffic. See `DNS_CORRELATION.md` for the complete contract.
+
 ## Endpoint objects
 
 Endpoint objects may contain:
@@ -147,7 +166,7 @@ success or failure.
 Example:
 
 ```json
-{"schema_version":2,"event_type":"connect_attempt","connection_id":42,"observed_at":"2026-08-26T12:00:00Z","kernel_timestamp_ns":1000,"protocol":"tcp","address_family":"AF_INET","process":{"pid":1234,"uid":1000,"gid":1000,"comm":"curl","start_time_ticks":123456,"parent":{"pid":1200,"start_time_ticks":120000},"cgroup":{"id":987,"path":"/user.slice/user-1000.slice/session-2.scope"},"namespaces":{"mnt":4026531841,"net":4026531993,"pid":4026531836}},"local":{},"remote":{"ip":"198.51.100.20","port":443}}
+{"schema_version":2,"event_type":"connect_attempt","connection_id":42,"observed_at":"2026-09-16T08:00:02Z","kernel_timestamp_ns":1000,"protocol":"tcp","address_family":"AF_INET","process":{"pid":1234,"uid":1000,"gid":1000,"comm":"curl","start_time_ticks":123456,"parent":{"pid":1200,"start_time_ticks":120000},"cgroup":{"id":987,"path":"/user.slice/user-1000.slice/session-2.scope"},"namespaces":{"mnt":4026531841,"net":4026531993,"pid":4026531836}},"local":{},"remote":{"ip":"198.51.100.20","port":443},"dns":{"name":"api.example","source":"resolver-log","confidence":"high","observed_at":"2026-09-16T08:00:00Z","expires_at":"2026-09-16T08:01:00Z"}}
 ```
 
 ## `tcp_established`

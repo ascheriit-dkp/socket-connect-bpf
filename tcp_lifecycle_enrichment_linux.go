@@ -38,6 +38,7 @@ type tcpLifecycleEnrichment struct {
 	Namespaces            *tcpLifecycleNamespacesPayload
 	Container             *tcpLifecycleContainerPayload
 	ASN                   *tcpLifecycleASNPayload
+	DNS                   *dnsCorrelationPayload
 }
 
 type tcpLifecycleEnrichmentLookups struct {
@@ -46,6 +47,7 @@ type tcpLifecycleEnrichmentLookups struct {
 	username    func(uint32) string
 	context     func(int) processContextSnapshot
 	asn         func(tcpLifecycleEventPayload) *tcpLifecycleASNPayload
+	dns         func(tcpLifecycleEventPayload) *dnsCorrelationPayload
 }
 
 type tcpLifecycleEnricher struct {
@@ -105,6 +107,7 @@ func defaultTCPLifecycleEnrichmentLookups() tcpLifecycleEnrichmentLookups {
 		username: lookupTCPLifecycleUsername,
 		context:  lookupProcessContext,
 		asn:      lookupTCPLifecycleASN,
+		dns:      lookupTCPLifecycleDNS,
 	}
 }
 
@@ -128,6 +131,7 @@ func (enricher *tcpLifecycleEnricher) Enrich(
 	payload.Namespaces = cloneTCPLifecycleNamespaces(enrichment.Namespaces)
 	payload.Container = cloneTCPLifecycleContainer(enrichment.Container)
 	payload.ASN = cloneTCPLifecycleASN(enrichment.ASN)
+	payload.DNS = cloneDNSCorrelation(enrichment.DNS)
 
 	switch payload.EventType {
 	case tcpLifecycleEventTypeConnectFailed,
@@ -189,6 +193,9 @@ func (enricher *tcpLifecycleEnricher) lookup(
 	if enrichment.User == "" {
 		enrichment.User = enricher.lookups.username(payload.UID)
 	}
+	if enricher.lookups.dns != nil {
+		enrichment.DNS = enricher.lookups.dns(payload)
+	}
 
 	if !enricher.includeExtendedFields {
 		return enrichment
@@ -197,7 +204,9 @@ func (enricher *tcpLifecycleEnricher) lookup(
 	if enrichment.ProcessArgs == "" && !trackedProcess {
 		enrichment.ProcessArgs = enricher.lookups.processArgs(pid)
 	}
-	enrichment.ASN = enricher.lookups.asn(payload)
+	if enricher.lookups.asn != nil {
+		enrichment.ASN = enricher.lookups.asn(payload)
+	}
 
 	return enrichment
 }
@@ -297,6 +306,16 @@ func lookupTCPLifecycleASN(
 	}
 
 	return nil
+}
+
+func lookupTCPLifecycleDNS(
+	payload tcpLifecycleEventPayload,
+) *dnsCorrelationPayload {
+	return lookupDNSCorrelation(
+		payload.Remote.IP,
+		payload.PID,
+		payload.ObservedAt,
+	)
 }
 
 func cloneTCPLifecycleParent(

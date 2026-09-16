@@ -9,11 +9,13 @@ on:
       - 'main.go'
       - 'securitySocketConnectSrc.c'
       - 'argument_redaction*.go'
+      - 'dns_*.go'
       - 'linux/process.go'
       - 'process_*.go'
       - 'tcp_lifecycle_*.go'
       - 'tcp_lifecycle_*.h'
       - 'scripts/test-argument-redaction.sh'
+      - 'scripts/test-dns-correlation.sh'
       - 'scripts/test-tcp-lifecycle.sh'
       - 'scripts/test-tcp-lifecycle-filters.sh'
       - 'scripts/test-tcp-lifecycle-table.sh'
@@ -27,11 +29,13 @@ on:
       - 'main.go'
       - 'securitySocketConnectSrc.c'
       - 'argument_redaction*.go'
+      - 'dns_*.go'
       - 'linux/process.go'
       - 'process_*.go'
       - 'tcp_lifecycle_*.go'
       - 'tcp_lifecycle_*.h'
       - 'scripts/test-argument-redaction.sh'
+      - 'scripts/test-dns-correlation.sh'
       - 'scripts/test-tcp-lifecycle.sh'
       - 'scripts/test-tcp-lifecycle-filters.sh'
       - 'scripts/test-tcp-lifecycle-table.sh'
@@ -103,4 +107,11 @@ jobs:
         run: |
           set -euo pipefail
           bash scripts/test-argument-redaction.sh \
+            ./bin/amd64/socket-connect-bpf
+
+      - name: Run DNS correlation integration test
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/test-dns-correlation.sh \
             ./bin/amd64/socket-connect-bpf

@@ -41,6 +41,7 @@ func (enricher *udpEnricher) Enrich(
 	}
 
 	lookupPayload := tcpLifecycleEventPayload{
+		ObservedAt:        payload.ObservedAt,
 		PID:               payload.PID,
 		UID:               payload.UID,
 		Comm:              payload.Comm,
@@ -66,6 +67,7 @@ func (enricher *udpEnricher) Enrich(
 	payload.Namespaces = cloneTCPLifecycleNamespaces(enrichment.Namespaces)
 	payload.Container = cloneTCPLifecycleContainer(enrichment.Container)
 	payload.ASN = cloneTCPLifecycleASN(enrichment.ASN)
+	payload.DNS = cloneDNSCorrelation(enrichment.DNS)
 
 	return payload
 }
